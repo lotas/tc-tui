@@ -58,9 +58,9 @@ func initUI() {
 			app.Stop()
 		})
 
-	pages = tview.NewPages().AddPage("main.menu", menu, true, true)
+	pages = tview.NewPages().AddPage("menu", menu, true, true)
 	pages.SetBorder(true)
-	pages.SetTitle("[ Taskcluster ]")
+	setAppTitle("")
 
 	infoLeft = tview.NewTextView().SetDynamicColors(true).
 		SetChangedFunc(func() {
@@ -91,8 +91,23 @@ func setViewCallback(name string, pageRenderer func() tview.Primitive) func() {
 	}
 }
 
+func setAppTitle(title string) {
+	formatted := "[ Taskcluster"
+	if title != "" {
+		formatted += " :: " + title
+	}
+	formatted += " ]"
+	pages.SetTitle(formatted)
+}
+
+func backToMenu() {
+	setAppTitle("")
+	pages.SwitchToPage("menu")
+	app.SetFocus(menu)
+}
+
 func renderWorkerPools() tview.Primitive {
-	pages.SetTitle("[ Taskcluster :: Worker Pools ]")
+	setAppTitle("Worker Pools")
 
 	pools := tview.NewList()
 	pools.AddItem("", "loading..", 0, nil)
@@ -109,11 +124,7 @@ func renderWorkerPools() tview.Primitive {
 			pools.AddItem(pool.ProviderID+" :: "+pool.WorkerPoolID, fmt.Sprintf("%d / %d", pool.CurrentCapacity, pool.RequestedCapacity), 0, nil)
 		}
 
-		pools.SetDoneFunc(func() {
-			pages.SwitchToPage("menu")
-			app.SetFocus(menu)
-		})
-
+		pools.SetDoneFunc(backToMenu)
 		app.Draw()
 	}()
 
@@ -121,7 +132,7 @@ func renderWorkerPools() tview.Primitive {
 }
 
 func renderRoles() tview.Primitive {
-	pages.SetTitle("[ Taskcluster :: Roles ]")
+	setAppTitle("Roles")
 
 	rolesView := tview.NewList()
 	rolesView.AddItem("", "loading..", 0, nil)
@@ -138,11 +149,7 @@ func renderRoles() tview.Primitive {
 			rolesView.AddItem(role.RoleID, fmt.Sprintf("%s", role.Scopes), 0, nil)
 		}
 
-		rolesView.SetDoneFunc(func() {
-			pages.SwitchToPage("menu")
-			app.SetFocus(menu)
-		})
-
+		rolesView.SetDoneFunc(backToMenu)
 		app.Draw()
 	}()
 
