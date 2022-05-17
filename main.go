@@ -21,16 +21,18 @@ type Version struct {
 }
 
 var (
-	app   *tview.Application
-	pages *tview.Pages
-	auth  *tcauth.Auth
-	root  *tview.Grid
-	menu  *tview.List
-	info  *tview.TextView
+	app       *tview.Application
+	pages     *tview.Pages
+	auth      *tcauth.Auth
+	root      *tview.Grid
+	menu      *tview.List
+	infoLeft  *tview.TextView
+	infoRight *tview.TextView
 
-	wm        *tcworkermanager.WorkerManager
-	tcVersion Version
-	tcRoot    string
+	wm         *tcworkermanager.WorkerManager
+	tcVersion  Version
+	tcRoot     string
+	tcClientId string
 )
 
 func main() {
@@ -60,15 +62,21 @@ func initUI() {
 	pages.SetBorder(true)
 	pages.SetTitle("[ Taskcluster ]")
 
-	info = tview.NewTextView().SetDynamicColors(true).
+	infoLeft = tview.NewTextView().SetDynamicColors(true).
 		SetChangedFunc(func() {
 			app.Draw()
 		}).
-		SetText(" Taskcluster version: [green]fetching[white]")
+		SetText(" Taskcluster version: [yellow]fetching[white]")
+	infoRight = tview.NewTextView().SetDynamicColors(true).
+		SetTextAlign(tview.AlignRight).
+		SetChangedFunc(func() {
+			app.Draw()
+		}).
+		SetText(fmt.Sprintf(" Root: [green]%s[white]", tcRoot))
 
-	root = tview.NewGrid().SetRows(3, 0).SetColumns(0, 0)
-	root.AddItem(info, 0, 0, 1, 1, 0, 0, false)
-	// root.AddItem(menu, 0, 1, 1, 1, 0, 0, false)
+	root = tview.NewGrid().SetRows(2, 0).SetColumns(0, 0)
+	root.AddItem(infoLeft, 0, 0, 1, 1, 0, 0, false)
+	root.AddItem(infoRight, 0, 1, 1, 1, 0, 0, false)
 	root.AddItem(pages, 1, 0, 1, 2, 0, 0, true)
 
 	app.SetRoot(root, true).SetFocus(pages)
@@ -146,12 +154,16 @@ func initTc() {
 	wm = tcworkermanager.NewFromEnv()
 
 	tcRoot = auth.RootURL
+	tcClientId = auth.Credentials.ClientID
+	if tcClientId == "" {
+		tcClientId = "anonymous"
+	}
 	tcVersion = getVersion()
 
-	infoText := fmt.Sprintf(" Taskluster version: [green]%s[white]\n Root: [yellow]%s[white]\n ", tcVersion.Version, tcRoot)
-	info.SetText(infoText)
-	// menu.SetItemText(0, "Taskcluster info", tcVersion.Version+" :: "+tcRoot)
-	// app.Draw()
+	infoText := fmt.Sprintf(" Taskcluster version: [yellow]%s[white]\n Client ID: [gray]%s[white]", tcVersion.Version, tcClientId)
+	infoLeft.SetText(infoText)
+
+	infoRight.SetText(fmt.Sprintf(" [green]%s[white] ", tcRoot))
 }
 
 func getVersion() Version {
