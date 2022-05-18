@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-
-	"github.com/rivo/tview"
-
 	"net/http"
+	s "strings"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	tcauth "github.com/taskcluster/taskcluster/v44/clients/client-go/tcauth"
 	tcworkermanager "github.com/taskcluster/taskcluster/v44/clients/client-go/tcworkermanager"
@@ -28,11 +29,14 @@ var (
 	menu      *tview.List
 	infoLeft  *tview.TextView
 	infoRight *tview.TextView
+	infoPage  *tview.TextView
+	lastPage  string
 
-	wm         *tcworkermanager.WorkerManager
-	tcVersion  Version
-	tcRoot     string
-	tcClientId string
+	wm            *tcworkermanager.WorkerManager
+	tcVersion     Version
+	tcRoot        string
+	tcClientId    string
+	authenticated bool
 )
 
 func main() {
@@ -50,6 +54,7 @@ func initUI() {
 	// TODO: add "/" shortcut to search/filter items on the page
 
 	menu = tview.NewList().
+		AddItem("Authenticate", "Signin", 0, nil).
 		AddItem("Workers", "List workers", 'w', nil).
 		AddItem("Worker Pools", "List pools", 'p', setViewCallback("worker-pools", renderWorkerPools)).
 		AddItem("Roles", "List roles", 'r', setViewCallback("roles", renderRoles)).
@@ -58,7 +63,21 @@ func initUI() {
 			app.Stop()
 		})
 
-	pages = tview.NewPages().AddPage("menu", menu, true, true)
+	infoPage = tview.NewTextView().SetDynamicColors(true).SetDoneFunc(func(key tcell.Key) {
+		switch key {
+		case tcell.KeyEscape:
+			if lastPage != "" {
+				pages.SwitchToPage(lastPage)
+			} else {
+				backToMenu()
+			}
+		}
+	})
+
+	pages = tview.NewPages().
+		AddPage("info", infoPage, true, false).
+		AddPage("menu", menu, true, true)
+
 	pages.SetBorder(true)
 	setAppTitle("")
 
@@ -84,11 +103,18 @@ func initUI() {
 
 func setViewCallback(name string, pageRenderer func() tview.Primitive) func() {
 	return func() {
-		if pages.HasPage("main." + name) {
-			pages.SwitchToPage("main." + name)
+		lastPage = "main." + name
+		if !pages.HasPage(lastPage) {
+			pages.AddPage(lastPage, pageRenderer(), true, true)
 		}
-		pages.AddPage("main."+name, pageRenderer(), true, true)
+		pages.HidePage("info")
+		pages.SwitchToPage(lastPage)
 	}
+}
+
+func displayInfoPage(info string) {
+	pages.SwitchToPage("info")
+	infoPage.SetText(info)
 }
 
 func setAppTitle(title string) {
@@ -132,24 +158,48 @@ func renderWorkerPools() tview.Primitive {
 }
 
 func renderRoles() tview.Primitive {
-	setAppTitle("Roles")
+	setAppTitle("Roles (0)")
+	displayInfoPage("[gray] loading..[white]")
 
 	rolesView := tview.NewList()
 	rolesView.AddItem("", "loading..", 0, nil)
+	rolesArr := make([]tcauth.GetRoleResponse, 0)
 
 	go func() {
-		rolesResponse, err := auth.ListRoles2("", "500")
-		if err != nil {
-			panic(err)
+		cont := ""
+
+		for {
+			rolesResponse, err := auth.ListRoles2(cont, "150")
+
+			if err != nil {
+				displayInfoPage(fmt.Sprintf(" [red]Error:[white] %s", s.Replace(err.Error(), "\\n", "\n", -1)))
+				break
+			} else {
+				rolesArr = append(rolesArr, rolesResponse.Roles...)
+			}
+
+			displayInfoPage(fmt.Sprintf(" [gray]loading.. [green]%d[white] roles", len(rolesArr)))
+
+			if len(rolesArr) == 0 {
+				displayInfoPage("[gray]No roles found[white]")
+				break
+			}
+
+			if cont = rolesResponse.ContinuationToken; cont == "" {
+				break
+			}
+
+			app.Draw()
 		}
 
+		setAppTitle(fmt.Sprintf("Roles (%d)", len(rolesArr)))
 		rolesView.RemoveItem(0)
 
-		for _, role := range rolesResponse.Roles {
+		for _, role := range rolesArr {
 			rolesView.AddItem(role.RoleID, fmt.Sprintf("%s", role.Scopes), 0, nil)
 		}
-
 		rolesView.SetDoneFunc(backToMenu)
+		pages.SwitchToPage("main.roles")
 		app.Draw()
 	}()
 
@@ -167,10 +217,27 @@ func initTc() {
 	}
 	tcVersion = getVersion()
 
-	infoText := fmt.Sprintf(" Taskcluster version: [yellow]%s[white]\n Client ID: [gray]%s[white]", tcVersion.Version, tcClientId)
+	// check authentication
+	authenticated = true
+	clientColor := "yellow"
+	clientExtra := ""
+	_, err := auth.CurrentScopes()
+	if err != nil {
+		clientColor = "red"
+		authenticated = false
+		clientExtra = " (not authenticated)"
+	}
+
+	infoText := fmt.Sprintf(
+		" Taskcluster version: [yellow]%s[white]\n Client ID: [%s]%s[gray]%s[white]",
+		tcVersion.Version,
+		clientColor,
+		tcClientId,
+		clientExtra)
 	infoLeft.SetText(infoText)
 
 	infoRight.SetText(fmt.Sprintf(" [green]%s[white] ", tcRoot))
+
 }
 
 func getVersion() Version {
