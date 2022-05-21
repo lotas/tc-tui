@@ -19,6 +19,5 @@ require (
 	github.com/taskcluster/taskcluster/v44 v44.13.6 // indirect
 	github.com/tent/hawk-go v0.0.0-20161026210932-d341ea318957 // indirect
 	golang.org/x/sys v0.0.0-20220222200937-f2425489ef4c // indirect
-	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d // indirect
 	golang.org/x/text v0.3.7 // indirect
 )
