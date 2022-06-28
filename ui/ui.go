@@ -7,14 +7,24 @@ import (
 	"github.com/rivo/tview"
 )
 
+type EventCallback func(UIEvent, interface{})
+
+type UIListRow struct {
+	PrimaryText   string
+	SecondaryText string
+}
+
 type TcUI interface {
 	SetTitle(string)
 	ShowInfo(string)
 
 	SetTaskclusterInfo(string, string, string, bool)
+	ListPage(string, []UIListRow)
 
 	Start() error
 	Stop()
+
+	SetEventCallback(EventCallback)
 }
 
 type UI struct {
@@ -26,7 +36,7 @@ type UI struct {
 	infoRight *tview.TextView
 	infoPage  *tview.TextView
 
-	title    string
+	evtCb    EventCallback
 	info     string
 	lastPage string
 }
@@ -77,20 +87,18 @@ func (ui *UI) SetTaskclusterInfo(root string, version string, clientID string, i
 		clientID,
 		clientExtra,
 	))
- 
-  ui.infoRight.SetText(fmt.Sprintf(" [green]%s[white] ", root))
+
+	ui.infoRight.SetText(fmt.Sprintf(" [green]%s[white] ", root))
 }
 
 func (ui *UI) init() {
 	ui.menu = tview.NewList().
-		AddItem("Authenticate", "Signin", 0, nil).
-		AddItem("Workers", "List workers", 'w', nil).
-		AddItem("Worker Pools", "List pools", 'p', nil). // setViewCallback("worker-pools", renderWorkerPools)).
-		AddItem("Roles", "List roles", 'r', nil).        // setViewCallback("roles", renderRoles)).
-		AddItem("Scopes", "List scopes", 's', nil).
-		AddItem("Quit", "Press to exit", 'q', func() {
-			ui.app.Stop()
-		})
+		AddItem("Authenticate", "Signin", 0, ui.eventHandler(Signin)).
+		AddItem("Workers", "List workers", 'w', ui.eventHandler(ListWorkers)).
+		AddItem("Worker Pools", "List pools", 'p', ui.eventHandler(ListWorkerPools)).
+		AddItem("Roles", "List roles", 'r', ui.eventHandler(ListRoles)).
+		AddItem("Scopes", "List scopes", 's', ui.eventHandler(ListScopes)).
+		AddItem("Quit", "Press to exit", 'q', ui.eventHandler(Quit))
 
 	ui.infoPage = tview.NewTextView().SetDynamicColors(true).SetDoneFunc(func(key tcell.Key) {
 		switch key {
@@ -127,11 +135,43 @@ func (ui *UI) init() {
 	ui.root.AddItem(ui.pages, 1, 0, 1, 2, 0, 0, true)
 
 	ui.app.SetRoot(ui.root, true).SetFocus(ui.pages)
+}
 
+func (ui *UI) ListPage(title string, rows []UIListRow) {
+	ui.SetTitle(title)
+	pageKey := fmt.Sprintf("list.%s", title)
+	ui.SetTitle(pageKey)
+
+	if ui.pages.HasPage(pageKey) {
+		ui.pages.RemovePage(pageKey)
+	}
+
+	listView := tview.NewList()
+	for _, row := range rows {
+		listView.AddItem(row.PrimaryText, row.SecondaryText, 0, nil)
+	}
+	listView.SetDoneFunc(ui.backToMenu)
+
+	ui.pages.HidePage("menu")
+	ui.pages.AddPage(pageKey, listView, true, true)
+	ui.pages.SwitchToPage(pageKey)
+	ui.pages.ShowPage(pageKey)
+	ui.app.Draw()
 }
 
 func (ui *UI) backToMenu() {
 	ui.SetTitle("")
 	ui.pages.SwitchToPage("menu")
+	ui.pages.ShowPage("menu")
 	ui.app.SetFocus(ui.menu)
+}
+
+func (ui *UI) SetEventCallback(cb EventCallback) {
+	ui.evtCb = cb
+}
+
+func (ui *UI) eventHandler(evt UIEvent) func() {
+	return func() {
+		ui.evtCb(evt, "")
+	}
 }

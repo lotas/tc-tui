@@ -1,34 +1,17 @@
 package main
 
 import (
-	"github.com/taskcluster/tc-tui/taskcluster"
-	"github.com/taskcluster/tc-tui/ui"
-)
-
-var (
-  tcui  ui.TcUI
-  tc  taskcluster.Taskcluster
+	"github.com/taskcluster/tc-tui/controller"
 )
 
 func main() {
-	tcui = ui.NewTcUI()
-  tc = taskcluster.NewTaskcluster()
+	ctrl := controller.NewController()
 
-  tcui.SetTaskclusterInfo("..", "..", "..", false)
-
-  go func() {
-    tcui.SetTaskclusterInfo(
-      tc.GetRoot(),
-      tc.GetVersion().Version,
-      tc.GetClientID(),
-      tc.IsAuthenticated(),
-    )
-  }()
-
-	if err := tcui.Start(); err != nil {
+	if err := ctrl.StartUI(); err != nil {
 		panic(err)
 	}
 }
+
 //
 // func setViewCallback(name string, pageRenderer func() tview.Primitive) func() {
 // 	return func() {
