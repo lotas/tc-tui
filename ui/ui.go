@@ -16,7 +16,7 @@ type UIListRow struct {
 
 type TcUI interface {
 	SetTitle(string)
-	ShowInfo(string)
+	ShowInfo(string, string)
 
 	SetTaskclusterInfo(string, string, string, bool)
 	ListPage(string, []UIListRow)
@@ -37,8 +37,7 @@ type UI struct {
 	infoPage  *tview.TextView
 
 	evtCb    EventCallback
-	info     string
-	lastPage string
+	lastPage UIPage
 }
 
 func NewTcUI() TcUI {
@@ -60,8 +59,10 @@ func (ui *UI) SetTitle(title string) {
 	ui.pages.SetTitle(formatted)
 }
 
-func (ui *UI) ShowInfo(info string) {
-	ui.info = info
+func (ui *UI) ShowInfo(title string, info string) {
+	ui.SetTitle(title)
+	ui.infoPage.Clear().SetText(info).SetWordWrap(true)
+	ui.SwitchPage(Info)
 }
 
 func (ui *UI) Start() error {
@@ -103,8 +104,9 @@ func (ui *UI) init() {
 	ui.infoPage = tview.NewTextView().SetDynamicColors(true).SetDoneFunc(func(key tcell.Key) {
 		switch key {
 		case tcell.KeyEscape:
-			if ui.lastPage != "" {
-				ui.pages.SwitchToPage(ui.lastPage)
+			// TODO add event?
+			if ui.lastPage != "" && ui.lastPage != Info {
+				ui.SwitchPage(ui.lastPage)
 			} else {
 				ui.backToMenu()
 			}
@@ -112,8 +114,8 @@ func (ui *UI) init() {
 	})
 
 	ui.pages = tview.NewPages().
-		AddPage("info", ui.infoPage, true, false).
-		AddPage("menu", ui.menu, true, true)
+		AddPage(string(Info), ui.infoPage, true, false).
+		AddPage(string(Menu), ui.menu, true, true)
 
 	ui.pages.SetBorder(true)
 
@@ -152,17 +154,17 @@ func (ui *UI) ListPage(title string, rows []UIListRow) {
 	}
 	listView.SetDoneFunc(ui.backToMenu)
 
-	ui.pages.HidePage("menu")
 	ui.pages.AddPage(pageKey, listView, true, true)
-	ui.pages.SwitchToPage(pageKey)
-	ui.pages.ShowPage(pageKey)
-	ui.app.Draw()
+}
+
+func (ui *UI) SwitchPage(page UIPage) {
+	ui.lastPage = page
+	ui.pages.SwitchToPage(string(page))
 }
 
 func (ui *UI) backToMenu() {
 	ui.SetTitle("")
-	ui.pages.SwitchToPage("menu")
-	ui.pages.ShowPage("menu")
+	ui.pages.SwitchToPage(string(Menu))
 	ui.app.SetFocus(ui.menu)
 }
 

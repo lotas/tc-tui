@@ -58,7 +58,7 @@ func (c *Controller) ShowRoles() {
 	rolesArr, err := c.tc.GetRoles()
 
 	if err != nil {
-		fmt.Printf("Error loading roles: %v", err)
+		c.ui.ShowInfo("Error loading roles", fmt.Sprintf("%s", err))
 		return
 	}
 
