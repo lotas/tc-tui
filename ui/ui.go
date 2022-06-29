@@ -142,7 +142,6 @@ func (ui *UI) init() {
 func (ui *UI) ListPage(title string, rows []UIListRow) {
 	ui.SetTitle(title)
 	pageKey := fmt.Sprintf("list.%s", title)
-	ui.SetTitle(pageKey)
 
 	if ui.pages.HasPage(pageKey) {
 		ui.pages.RemovePage(pageKey)

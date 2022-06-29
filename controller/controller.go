@@ -55,22 +55,26 @@ func (c *Controller) ShowInfo() {
 }
 
 func (c *Controller) ShowRoles() {
-	rolesArr, err := c.tc.GetRoles()
+	c.ui.SetTitle("Loading roles")
 
-	if err != nil {
-		c.ui.ShowInfo("Error loading roles", fmt.Sprintf("%s", err))
-		return
-	}
+	go func() {
+		rolesArr, err := c.tc.GetRoles()
 
-	rows := make([]ui.UIListRow, 0)
-	for _, role := range rolesArr {
-		rows = append(rows, ui.UIListRow{
-			PrimaryText:   role.RoleID,
-			SecondaryText: fmt.Sprintf("%s", role.Scopes),
-		})
-	}
+		if err != nil {
+			c.ui.ShowInfo("Error loading roles", fmt.Sprintf("%s", err))
+			return
+		}
 
-	c.ui.ListPage("Roles", rows)
+		rows := make([]ui.UIListRow, 0)
+		for _, role := range rolesArr {
+			rows = append(rows, ui.UIListRow{
+				PrimaryText:   role.RoleID,
+				SecondaryText: fmt.Sprintf("%s", role.Scopes),
+			})
+		}
+
+		c.ui.ListPage("Roles", rows)
+	}()
 }
 
 func (c *Controller) StartUI() error {
