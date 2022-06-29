@@ -7,6 +7,7 @@ const (
 	Signin
 	ListWorkers
 	ListWorkerPools
+	ShowWorkerPool
 	ListRoles
 	ShowRole
 	ListScopes

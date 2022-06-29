@@ -15,7 +15,8 @@ type TcController interface {
 }
 
 type EntityCache struct {
-	Roles taskcluster.RolesList
+	Roles       taskcluster.RolesList
+	WorkerPools taskcluster.WorkerPoolList
 }
 
 type Controller struct {
@@ -48,6 +49,12 @@ func (c *Controller) eventHandler(evt ui.UIEvent, payload ui.EventPayload) {
 		return
 	case ui.ShowRole:
 		c.ShowRole(payload)
+		return
+	case ui.ListWorkerPools:
+		c.ShowWorkerPools()
+		return
+	case ui.ShowWorkerPool:
+		c.ShowWorkerPool(payload)
 		return
 	}
 
@@ -91,7 +98,7 @@ func (c *Controller) ShowRoles() {
 			})
 		}
 
-		c.ui.ListPage("Roles", rows, false)
+		c.ui.ListPage("Roles", rows, false, ui.ShowRole)
 		c.ui.Redraw()
 	}()
 }
@@ -113,6 +120,62 @@ func (c *Controller) ShowRole(payload ui.EventPayload) {
 	)
 
 	c.ui.ShowInfo(fmt.Sprintf("Role :: %s", payload.Title), info)
+}
+
+func (c *Controller) ShowWorkerPools() {
+	c.ui.SetTitle("Loading worker pools")
+
+	go func() {
+		var err error
+		workerPools := c.entities.WorkerPools
+
+		if len(workerPools) == 0 {
+			workerPools, err = c.tc.GetWorkerPools()
+			if err != nil {
+				c.ui.ShowInfo("Error loading worker pools", fmt.Sprintf("%s", err))
+				return
+			}
+		}
+		c.entities.WorkerPools = workerPools
+
+		rows := make([]ui.UIListRow, 0)
+		for _, pool := range workerPools {
+			rows = append(rows, ui.UIListRow{
+				PrimaryText:   pool.ProviderID + " :: " + pool.WorkerPoolID,
+				SecondaryText: fmt.Sprintf("%d / %d", pool.CurrentCapacity, pool.RequestedCapacity),
+			})
+		}
+
+		c.ui.ListPage("Worker Pools", rows, true, ui.ShowWorkerPool)
+		c.ui.Redraw()
+	}()
+}
+
+func (c *Controller) ShowWorkerPool(payload ui.EventPayload) {
+	pool := c.entities.WorkerPools[payload.Index]
+
+	info := fmt.Sprintf(
+		"[green]Description:[white] %s\n\n"+
+			"[green]Created:[white] %s\n"+
+			"[green]Owner:[white] %s\n\n"+
+			"[green]Requested capacity:[blue] %d\n"+
+			"[green]Running capacity:[blue] %d\n"+
+			"[green]Stopped capacity:[blue] %d\n"+
+			"[green]Running count:[blue] %d\n"+
+			"[green]Stopped count:[blue] %d\n\n"+
+			"[green]Config:[white] %s\n\n",
+		pool.Description,
+		pool.Created,
+		pool.Owner,
+		pool.RequestedCapacity,
+		pool.RunningCapacity,
+		pool.StoppedCapacity,
+		pool.RunningCount,
+		pool.StoppedCount,
+		pool.Config,
+	)
+
+	c.ui.ShowInfo(fmt.Sprintf("Worker Pool :: %s", payload.Title), info)
 }
 
 func (c *Controller) StartUI() error {

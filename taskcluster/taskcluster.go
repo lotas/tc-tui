@@ -12,6 +12,7 @@ import (
 const PageSize = "150"
 
 type RolesList []tcauth.GetRoleResponse
+type WorkerPoolList []tcworkermanager.WorkerPoolFullDefinition
 
 type Taskcluster interface {
 	GetVersion() Version
@@ -21,7 +22,7 @@ type Taskcluster interface {
 	IsAuthenticated() bool
 
 	GetRoles() (RolesList, error)
-	GetWorkerPools() ([]tcworkermanager.WorkerPoolFullDefinition, error)
+	GetWorkerPools() (WorkerPoolList, error)
 }
 
 type TC struct {
@@ -79,7 +80,7 @@ func (tc *TC) GetVersion() Version {
 }
 
 func (tc *TC) GetRoles() (RolesList, error) {
-	rolesArr := make([]tcauth.GetRoleResponse, 0)
+	rolesArr := make(RolesList, 0)
 	cont := ""
 
 	for {
@@ -99,8 +100,8 @@ func (tc *TC) GetRoles() (RolesList, error) {
 	return rolesArr, nil
 }
 
-func (tc *TC) GetWorkerPools() ([]tcworkermanager.WorkerPoolFullDefinition, error) {
-	wpArr := make([]tcworkermanager.WorkerPoolFullDefinition, 0)
+func (tc *TC) GetWorkerPools() (WorkerPoolList, error) {
+	wpArr := make(WorkerPoolList, 0)
 	cont := ""
 
 	for {

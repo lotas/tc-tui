@@ -19,7 +19,7 @@ type TcUI interface {
 	ShowInfo(string, string)
 
 	SetTaskclusterInfo(string, string, string, bool)
-	ListPage(string, []UIListRow, bool)
+	ListPage(string, []UIListRow, bool, UIEvent)
 
 	Start() error
 	Stop()
@@ -140,7 +140,7 @@ func (ui *UI) init() {
 	ui.app.SetRoot(ui.root, true).SetFocus(ui.pages)
 }
 
-func (ui *UI) ListPage(title string, rows []UIListRow, showSecondaryText bool) {
+func (ui *UI) ListPage(title string, rows []UIListRow, showSecondaryText bool, showType UIEvent) {
 	ui.SetTitle(title)
 	pageKey := fmt.Sprintf("list.%s", title)
 
@@ -154,7 +154,8 @@ func (ui *UI) ListPage(title string, rows []UIListRow, showSecondaryText bool) {
 	}
 	listView.SetDoneFunc(ui.backToMenu)
 	listView.SetSelectedFunc(func(i int, s1, s2 string, r rune) {
-		ui.evtCb(ShowRole, EventPayload{
+		// todo move cb to be passed as arg
+		ui.evtCb(showType, EventPayload{
 			Index: i,
 			Title: s1,
 		})
