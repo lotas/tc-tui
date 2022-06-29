@@ -11,14 +11,16 @@ import (
 
 const PageSize = "150"
 
+type RolesList []tcauth.GetRoleResponse
+
 type Taskcluster interface {
 	GetVersion() Version
 	GetRoot() string
-  GetClientID() string
+	GetClientID() string
 
-  IsAuthenticated() bool
+	IsAuthenticated() bool
 
-	GetRoles() ([]tcauth.GetRoleResponse, error)
+	GetRoles() (RolesList, error)
 	GetWorkerPools() ([]tcworkermanager.WorkerPoolFullDefinition, error)
 }
 
@@ -26,7 +28,7 @@ type TC struct {
 	auth *tcauth.Auth
 	wm   *tcworkermanager.WorkerManager
 
-	tcRoot          string
+	tcRoot string
 }
 
 type Version struct {
@@ -51,19 +53,16 @@ func NewTaskcluster() Taskcluster {
 }
 
 func (tc *TC) GetClientID() string {
-  if tc.auth.Credentials.ClientID != "" {
-    return tc.auth.Credentials.ClientID
-  }
+	if tc.auth.Credentials.ClientID != "" {
+		return tc.auth.Credentials.ClientID
+	}
 
-  return "(anonymous)"
+	return "(anonymous)"
 }
 
 func (tc *TC) IsAuthenticated() bool {
-  _, err := tc.auth.CurrentScopes()
-  if err != nil {
-    return false
-  }
-  return true
+	_, err := tc.auth.CurrentScopes()
+	return err == nil
 }
 
 func (tc *TC) GetVersion() Version {
@@ -79,7 +78,7 @@ func (tc *TC) GetVersion() Version {
 	return ver
 }
 
-func (tc *TC) GetRoles() ([]tcauth.GetRoleResponse, error) {
+func (tc *TC) GetRoles() (RolesList, error) {
 	rolesArr := make([]tcauth.GetRoleResponse, 0)
 	cont := ""
 

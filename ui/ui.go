@@ -7,7 +7,6 @@ import (
 	"github.com/rivo/tview"
 )
 
-type EventCallback func(UIEvent, interface{})
 type SelectedCallback func(int, string, string, rune)
 
 type UIListRow struct {
@@ -20,10 +19,11 @@ type TcUI interface {
 	ShowInfo(string, string)
 
 	SetTaskclusterInfo(string, string, string, bool)
-	ListPage(string, []UIListRow, bool, SelectedCallback)
+	ListPage(string, []UIListRow, bool)
 
 	Start() error
 	Stop()
+	Redraw()
 
 	SetEventCallback(EventCallback)
 }
@@ -140,7 +140,7 @@ func (ui *UI) init() {
 	ui.app.SetRoot(ui.root, true).SetFocus(ui.pages)
 }
 
-func (ui *UI) ListPage(title string, rows []UIListRow, showSecondaryText bool, onSelected SelectedCallback) {
+func (ui *UI) ListPage(title string, rows []UIListRow, showSecondaryText bool) {
 	ui.SetTitle(title)
 	pageKey := fmt.Sprintf("list.%s", title)
 
@@ -153,7 +153,12 @@ func (ui *UI) ListPage(title string, rows []UIListRow, showSecondaryText bool, o
 		listView.AddItem(row.PrimaryText, row.SecondaryText, 0, nil)
 	}
 	listView.SetDoneFunc(ui.backToMenu)
-	listView.SetSelectedFunc(onSelected)
+	listView.SetSelectedFunc(func(i int, s1, s2 string, r rune) {
+		ui.evtCb(ShowRole, EventPayload{
+			Index: i,
+			Title: s1,
+		})
+	})
 	listView.ShowSecondaryText(showSecondaryText)
 
 	ui.pages.AddPage(pageKey, listView, true, true)
@@ -163,6 +168,10 @@ func (ui *UI) ListPage(title string, rows []UIListRow, showSecondaryText bool, o
 func (ui *UI) SwitchPage(page UIPage) {
 	ui.lastPage = page
 	ui.pages.SwitchToPage(string(page))
+}
+
+func (ui *UI) Redraw() {
+	ui.app.Draw()
 }
 
 func (ui *UI) backToMenu() {
@@ -177,6 +186,6 @@ func (ui *UI) SetEventCallback(cb EventCallback) {
 
 func (ui *UI) eventHandler(evt UIEvent) func() {
 	return func() {
-		ui.evtCb(evt, "")
+		ui.evtCb(evt, EventPayload{})
 	}
 }
