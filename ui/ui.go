@@ -8,6 +8,7 @@ import (
 )
 
 type EventCallback func(UIEvent, interface{})
+type SelectedCallback func(int, string, string, rune)
 
 type UIListRow struct {
 	PrimaryText   string
@@ -19,7 +20,7 @@ type TcUI interface {
 	ShowInfo(string, string)
 
 	SetTaskclusterInfo(string, string, string, bool)
-	ListPage(string, []UIListRow)
+	ListPage(string, []UIListRow, bool, SelectedCallback)
 
 	Start() error
 	Stop()
@@ -62,7 +63,7 @@ func (ui *UI) SetTitle(title string) {
 func (ui *UI) ShowInfo(title string, info string) {
 	ui.SetTitle(title)
 	ui.infoPage.Clear().SetText(info).SetWordWrap(true)
-	ui.SwitchPage(Info)
+	ui.pages.SwitchToPage(string(Info))
 }
 
 func (ui *UI) Start() error {
@@ -139,7 +140,7 @@ func (ui *UI) init() {
 	ui.app.SetRoot(ui.root, true).SetFocus(ui.pages)
 }
 
-func (ui *UI) ListPage(title string, rows []UIListRow) {
+func (ui *UI) ListPage(title string, rows []UIListRow, showSecondaryText bool, onSelected SelectedCallback) {
 	ui.SetTitle(title)
 	pageKey := fmt.Sprintf("list.%s", title)
 
@@ -152,8 +153,11 @@ func (ui *UI) ListPage(title string, rows []UIListRow) {
 		listView.AddItem(row.PrimaryText, row.SecondaryText, 0, nil)
 	}
 	listView.SetDoneFunc(ui.backToMenu)
+	listView.SetSelectedFunc(onSelected)
+	listView.ShowSecondaryText(showSecondaryText)
 
 	ui.pages.AddPage(pageKey, listView, true, true)
+	ui.lastPage = UIPage(pageKey)
 }
 
 func (ui *UI) SwitchPage(page UIPage) {

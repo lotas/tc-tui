@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
 	"github.com/taskcluster/tc-tui/ui"
@@ -69,11 +70,26 @@ func (c *Controller) ShowRoles() {
 		for _, role := range rolesArr {
 			rows = append(rows, ui.UIListRow{
 				PrimaryText:   role.RoleID,
-				SecondaryText: fmt.Sprintf("%s", role.Scopes),
+				SecondaryText: "",
 			})
 		}
 
-		c.ui.ListPage("Roles", rows)
+		c.ui.ListPage("Roles", rows, false, func(i int, s1, s2 string, r rune) {
+			role := rolesArr[i]
+			info := fmt.Sprintf(
+				"[green]Description:[white] %s\n\n[green]Created:[white] %s\n"+
+					"[green]Last Modified:[white] %s\n\n[green]Scopes (%d):[white]\n\n%s"+
+					"\n\n[green]Expanded Scopes (%d):[white]\n\n%s",
+				role.Description,
+				role.Created,
+				role.LastModified,
+				len(role.Scopes),
+				strings.Join(role.Scopes[:], "\n"),
+				len(role.ExpandedScopes),
+				strings.Join(role.ExpandedScopes[:], "\n"),
+			)
+			c.ui.ShowInfo(s1, info)
+		})
 	}()
 }
 
