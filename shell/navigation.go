@@ -86,6 +86,7 @@ func (s *Shell) goBack() {
 }
 
 func (s *Shell) renderList(res resource.Resource, scope string) {
+	s.currentDetailActions = nil
 	s.closeFooterInput()
 	s.filterQuery = ""
 	s.currentListResource = res.Name()
@@ -146,6 +147,7 @@ func (s *Shell) loadList(res resource.Resource, scope string, isInitial bool) {
 }
 
 func (s *Shell) renderDetail(res resource.Resource, id string) {
+	s.currentDetailActions = nil
 	s.closeFooterInput()
 
 	s.setTitle("Loading " + res.Name() + "...")
@@ -175,6 +177,7 @@ func (s *Shell) loadDetail(res resource.Resource, id string, isInitial bool) {
 			}
 
 			s.detail.SetData(detail)
+			s.currentDetailActions = detail.Actions
 			s.activeContent = s.detail
 			s.setTitle(detail.Title)
 			if s.footerMode == footerHints {

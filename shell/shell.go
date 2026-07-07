@@ -48,10 +48,11 @@ type Shell struct {
 	footerInput *tview.InputField
 	footerMode  footerMode
 
-	currentListResource string
-	currentColumns      []resource.Column
-	lastRows            []resource.Row
-	filterQuery         string
+	currentListResource  string
+	currentColumns       []resource.Column
+	lastRows             []resource.Row
+	filterQuery          string
+	currentDetailActions []resource.DetailAction
 
 	activeContent tview.Primitive
 

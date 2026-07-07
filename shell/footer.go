@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
@@ -21,9 +22,12 @@ func (s *Shell) initFooter() {
 }
 
 func (s *Shell) renderFooterHints() {
-	s.footerHint.SetText(
-		" [yellow]:[white] command   [yellow]/[white] filter   [yellow]Esc[white] back/quit",
-	)
+	hint := " [yellow]:[white] command   [yellow]/[white] filter   [yellow]Esc[white] back/quit"
+	for _, action := range s.currentDetailActions {
+		hint += fmt.Sprintf("   [yellow]<%c>[white] %s", action.Key, action.Label)
+	}
+
+	s.footerHint.SetText(hint)
 }
 
 func (s *Shell) openCommandBar() {

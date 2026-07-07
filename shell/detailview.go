@@ -1,9 +1,6 @@
 package shell
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
@@ -35,17 +32,7 @@ func (d *DetailView) SetOnAction(fn func(target resource.NavTarget)) {
 
 func (d *DetailView) SetData(detail resource.Detail) {
 	d.actions = detail.Actions
-
-	body := detail.Body
-	if len(detail.Actions) > 0 {
-		hints := make([]string, 0, len(detail.Actions))
-		for _, action := range detail.Actions {
-			hints = append(hints, fmt.Sprintf("[yellow]<%c>[white] %s", action.Key, action.Label))
-		}
-		body += "\n\n" + strings.Join(hints, "   ")
-	}
-
-	d.Clear().SetText(body).ScrollToBeginning()
+	d.Clear().SetText(detail.Body).ScrollToBeginning()
 }
 
 func (d *DetailView) handleKey(event *tcell.EventKey) *tcell.EventKey {
