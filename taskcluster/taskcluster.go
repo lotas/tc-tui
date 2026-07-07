@@ -22,7 +22,9 @@ type Taskcluster interface {
 	IsAuthenticated() bool
 
 	GetRoles() (RolesList, error)
+	GetRole(roleID string) (*tcauth.GetRoleResponse, error)
 	GetWorkerPools() (WorkerPoolList, error)
+	GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error)
 }
 
 type TC struct {
@@ -80,45 +82,41 @@ func (tc *TC) GetVersion() Version {
 }
 
 func (tc *TC) GetRoles() (RolesList, error) {
-	rolesArr := make(RolesList, 0)
-	cont := ""
-
-	for {
-		rolesResponse, err := tc.auth.ListRoles2(cont, PageSize)
-
+	roles, err := paginate(func(cont string) ([]tcauth.GetRoleResponse, string, error) {
+		resp, err := tc.auth.ListRoles2(cont, PageSize)
 		if err != nil {
-			return nil, err
-		} else {
-			rolesArr = append(rolesArr, rolesResponse.Roles...)
+			return nil, "", err
 		}
-
-		if cont = rolesResponse.ContinuationToken; cont == "" {
-			break
-		}
+		return resp.Roles, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	return rolesArr, nil
+	return RolesList(roles), nil
+}
+
+func (tc *TC) GetRole(roleID string) (*tcauth.GetRoleResponse, error) {
+	return tc.auth.Role(roleID)
 }
 
 func (tc *TC) GetWorkerPools() (WorkerPoolList, error) {
-	wpArr := make(WorkerPoolList, 0)
-	cont := ""
-
-	for {
-		wpResponse, err := tc.wm.ListWorkerPools(cont, PageSize)
-
+	pools, err := paginate(func(cont string) ([]tcworkermanager.WorkerPoolFullDefinition, string, error) {
+		resp, err := tc.wm.ListWorkerPools(cont, PageSize)
 		if err != nil {
-			return nil, err
-		} else {
-			wpArr = append(wpArr, wpResponse.WorkerPools...)
+			return nil, "", err
 		}
-
-		if cont = wpResponse.ContinuationToken; cont == "" {
-			break
-		}
+		return resp.WorkerPools, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	return wpArr, nil
+	return WorkerPoolList(pools), nil
+}
+
+func (tc *TC) GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error) {
+	return tc.wm.WorkerPool(workerPoolID)
 }
 
 func (tc *TC) GetRoot() string {
