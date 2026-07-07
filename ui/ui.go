@@ -62,7 +62,7 @@ func (ui *UI) SetTitle(title string) {
 
 func (ui *UI) ShowInfo(title string, info string) {
 	ui.SetTitle(title)
-	ui.infoPage.Clear().SetText(info).SetWordWrap(true)
+	ui.infoPage.Clear().SetText(info).SetWordWrap(true).ScrollToBeginning()
 	ui.pages.SwitchToPage(string(Info))
 }
 
