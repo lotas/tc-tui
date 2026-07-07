@@ -13,6 +13,7 @@ const PageSize = "150"
 
 type RolesList []tcauth.GetRoleResponse
 type WorkerPoolList []tcworkermanager.WorkerPoolFullDefinition
+type WorkerList []tcworkermanager.WorkerFullDefinition
 
 type Taskcluster interface {
 	GetVersion() Version
@@ -25,6 +26,8 @@ type Taskcluster interface {
 	GetRole(roleID string) (*tcauth.GetRoleResponse, error)
 	GetWorkerPools() (WorkerPoolList, error)
 	GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error)
+	GetWorkersForWorkerPool(workerPoolID string) (WorkerList, error)
+	GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error)
 }
 
 type TC struct {
@@ -117,6 +120,25 @@ func (tc *TC) GetWorkerPools() (WorkerPoolList, error) {
 
 func (tc *TC) GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error) {
 	return tc.wm.WorkerPool(workerPoolID)
+}
+
+func (tc *TC) GetWorkersForWorkerPool(workerPoolID string) (WorkerList, error) {
+	workers, err := paginate(func(cont string) ([]tcworkermanager.WorkerFullDefinition, string, error) {
+		resp, err := tc.wm.ListWorkersForWorkerPool(workerPoolID, cont, "" /* launchConfigId */, PageSize, "" /* state */)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Workers, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return WorkerList(workers), nil
+}
+
+func (tc *TC) GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error) {
+	return tc.wm.Worker(workerPoolID, workerGroup, workerID)
 }
 
 func (tc *TC) GetRoot() string {

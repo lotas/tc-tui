@@ -83,7 +83,12 @@ func (s *Shell) init() {
 
 	s.detail = NewDetailView()
 	s.detail.SetOnAction(func(target resource.NavTarget) {
-		s.showDetail(target.ResourceName, target.ID)
+		switch target.Kind {
+		case resource.NavScopedList:
+			s.pushScopedList(target.ResourceName, target.ID)
+		default:
+			s.showDetail(target.ResourceName, target.ID)
+		}
 	})
 
 	s.errorView = NewErrorView()
@@ -163,7 +168,7 @@ func (s *Shell) SetInfo(root, version, clientID string, authenticated bool) {
 // Start pushes the given resource as the root view and runs the tview event
 // loop. It blocks until Stop() is called.
 func (s *Shell) Start(rootResource string) error {
-	s.switchResource(rootResource)
+	s.switchResource(rootResource, "")
 	return s.app.Run()
 }
 

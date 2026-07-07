@@ -77,6 +77,17 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 	return Detail{
 		Title: fmt.Sprintf("Worker Pool :: %s", pool.WorkerPoolID),
 		Body:  body,
+		Actions: []DetailAction{
+			{
+				Key:   'w',
+				Label: "workers",
+				Target: NavTarget{
+					ResourceName: "workers",
+					ID:           pool.WorkerPoolID,
+					Kind:         NavScopedList,
+				},
+			},
+		},
 	}, nil
 }
 

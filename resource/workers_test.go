@@ -1,0 +1,150 @@
+package resource
+
+import (
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	tcclient "github.com/taskcluster/taskcluster/v101/clients/client-go"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcworkermanager"
+
+	"github.com/taskcluster/tc-tui/taskcluster"
+)
+
+func TestWorkersResourceScopedList(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workers: taskcluster.WorkerList{
+			{
+				WorkerPoolID: "gcp/pool-a",
+				WorkerGroup:  "us-west1",
+				WorkerID:     "i-1234",
+				State:        "running",
+				Capacity:     1,
+			},
+		},
+	}
+	res := NewWorkersResource(fake)
+
+	rows, err := res.ScopedList("gcp/pool-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].ID != "gcp/pool-a::us-west1::i-1234" {
+		t.Fatalf("unexpected id: %s", rows[0].ID)
+	}
+	if rows[0].Cells[0] != "running" || rows[0].Cells[1] != "us-west1" || rows[0].Cells[2] != "i-1234" || rows[0].Cells[3] != "1" {
+		t.Fatalf("unexpected cells: %+v", rows[0].Cells)
+	}
+}
+
+func TestWorkersResourceScopedListError(t *testing.T) {
+	wantErr := errors.New("boom")
+	fake := &fakeTaskcluster{workersErr: wantErr}
+	res := NewWorkersResource(fake)
+
+	_, err := res.ScopedList("gcp/pool-a")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+}
+
+func TestWorkersResourceListReturnsScopeRequiredError(t *testing.T) {
+	res := NewWorkersResource(&fakeTaskcluster{})
+
+	if _, err := res.List(); err == nil {
+		t.Fatalf("expected an error, got nil")
+	}
+}
+
+func TestWorkersResourceEmptyScopeResource(t *testing.T) {
+	res := NewWorkersResource(&fakeTaskcluster{})
+
+	if got := res.EmptyScopeResource(); got != "workerpools" {
+		t.Fatalf("expected %q, got %q", "workerpools", got)
+	}
+}
+
+func TestWorkersResourceDescribe(t *testing.T) {
+	fake := &fakeTaskcluster{
+		worker: &tcworkermanager.WorkerFullDefinition{
+			WorkerPoolID:   "gcp/pool-a",
+			WorkerGroup:    "us-west1",
+			WorkerID:       "i-1234",
+			State:          "running",
+			Capacity:       1,
+			LaunchConfigID: "lc-1",
+			Created:        tcclient.Time(time.Now()),
+			LastModified:   tcclient.Time(time.Now()),
+			LastChecked:    tcclient.Time(time.Now()),
+			Expires:        tcclient.Time(time.Now()),
+		},
+	}
+	res := NewWorkersResource(fake)
+
+	detail, err := res.Describe("gcp/pool-a::us-west1::i-1234")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if detail.Title != "Worker :: i-1234" {
+		t.Fatalf("unexpected title: %s", detail.Title)
+	}
+	if !strings.Contains(detail.Body, "running") || !strings.Contains(detail.Body, "lc-1") {
+		t.Fatalf("unexpected body: %s", detail.Body)
+	}
+}
+
+func TestWorkersResourceDescribeError(t *testing.T) {
+	wantErr := errors.New("boom")
+	fake := &fakeTaskcluster{workerErr: wantErr}
+	res := NewWorkersResource(fake)
+
+	_, err := res.Describe("gcp/pool-a::us-west1::i-1234")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+}
+
+func TestWorkersResourceDescribeMalformedID(t *testing.T) {
+	res := NewWorkersResource(&fakeTaskcluster{})
+
+	if _, err := res.Describe("not-a-valid-id"); err == nil {
+		t.Fatalf("expected an error for a malformed id, got nil")
+	}
+}
+
+func TestComposeAndParseWorkerID(t *testing.T) {
+	id := composeWorkerID("gcp/pool-a", "us-west1", "i-1234")
+
+	workerPoolID, workerGroup, workerID, err := parseWorkerID(id)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if workerPoolID != "gcp/pool-a" || workerGroup != "us-west1" || workerID != "i-1234" {
+		t.Fatalf("unexpected round trip: %q %q %q", workerPoolID, workerGroup, workerID)
+	}
+}
+
+func TestComposeAndParseWorkerIDWithEmptyComponent(t *testing.T) {
+	id := composeWorkerID("gcp/pool-a", "", "i-1234")
+
+	workerPoolID, workerGroup, workerID, err := parseWorkerID(id)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if workerPoolID != "gcp/pool-a" || workerGroup != "" || workerID != "i-1234" {
+		t.Fatalf("unexpected round trip: %q %q %q", workerPoolID, workerGroup, workerID)
+	}
+}
+
+func TestParseWorkerIDRejectsMalformedInput(t *testing.T) {
+	if _, _, _, err := parseWorkerID("only-one-part"); err == nil {
+		t.Fatalf("expected an error for an id with the wrong number of parts")
+	}
+	if _, _, _, err := parseWorkerID("a::b::c::d"); err == nil {
+		t.Fatalf("expected an error for an id with too many parts")
+	}
+}

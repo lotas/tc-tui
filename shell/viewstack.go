@@ -8,11 +8,13 @@ const (
 )
 
 // View is one entry in the navigation stack: which resource, whether it's
-// the list or a single entity's detail, and (for detail) which entity.
+// the list or a single entity's detail, (for detail) which entity, and (for
+// a scoped list) which parent scope it was opened with.
 type View struct {
 	ResourceName string
 	Kind         ViewKind
 	SelectedID   string
+	Scope        string
 }
 
 // ViewStack replaces the old single lastPage field with real multi-level

@@ -2,33 +2,39 @@ package shell
 
 import "time"
 
-// Invalidate re-fetches the given resource/id if it is currently the
-// topmost view, and redraws. Called by the refresh ticker today; a future
-// push-event listener (e.g. Pulse) could call this directly instead of on a
-// timer, without any view-layer changes.
-func (s *Shell) Invalidate(resourceName, id string) {
+// isTopView reports whether view is currently the topmost view on the
+// stack.
+func (s *Shell) isTopView(view View) bool {
 	top, ok := s.stack.Top()
-	if !ok || top.ResourceName != resourceName || top.SelectedID != id {
+	return ok && top == view
+}
+
+// Invalidate re-fetches the given view if it is currently the topmost view,
+// and redraws. Called by the refresh ticker today; a future push-event
+// listener (e.g. Pulse) could call this directly instead of on a timer,
+// without any view-layer changes.
+func (s *Shell) Invalidate(view View) {
+	if !s.isTopView(view) {
 		return
 	}
 
-	res, ok := s.registry.Resolve(resourceName)
+	res, ok := s.registry.Resolve(view.ResourceName)
 	if !ok {
 		return
 	}
 
-	switch top.Kind {
+	switch view.Kind {
 	case ListKind:
-		s.loadList(res, false)
+		s.loadList(res, view.Scope, false)
 	case DetailKind:
-		s.loadDetail(res, id, false)
+		s.loadDetail(res, view.SelectedID, false)
 	}
 }
 
 // startRefreshLoop stops any existing ticker and, if interval > 0, starts a
-// new one that calls Invalidate for as long as this resource/id stays
-// topmost on the stack.
-func (s *Shell) startRefreshLoop(resourceName, id string, interval time.Duration) {
+// new one that invalidates view for as long as it stays topmost on the
+// stack.
+func (s *Shell) startRefreshLoop(view View, interval time.Duration) {
 	s.stopRefreshLoop()
 
 	if interval <= 0 {
@@ -46,7 +52,7 @@ func (s *Shell) startRefreshLoop(resourceName, id string, interval time.Duration
 			select {
 			case <-ticker.C:
 				s.app.QueueUpdateDraw(func() {
-					s.Invalidate(resourceName, id)
+					s.Invalidate(view)
 				})
 			case <-stop:
 				return

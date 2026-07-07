@@ -9,7 +9,10 @@ import (
 
 // switchResource replaces the entire navigation stack with a fresh List
 // view for the given resource name/alias — the `:` command bar's behavior.
-func (s *Shell) switchResource(nameOrAlias string) {
+// If the resolved resource is a ScopedResource and no scope was given, it
+// redirects to that resource's EmptyScopeResource instead of attempting an
+// unscoped fetch.
+func (s *Shell) switchResource(nameOrAlias, scope string) {
 	res, ok := s.registry.Resolve(nameOrAlias)
 	if !ok {
 		s.showError(nameOrAlias, fmt.Errorf(
@@ -18,8 +21,13 @@ func (s *Shell) switchResource(nameOrAlias string) {
 		return
 	}
 
-	s.stack.ResetTo(View{ResourceName: res.Name(), Kind: ListKind})
-	s.renderList(res)
+	if scoped, isScoped := res.(resource.ScopedResource); isScoped && scope == "" {
+		s.switchResource(scoped.EmptyScopeResource(), "")
+		return
+	}
+
+	s.stack.ResetTo(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope})
+	s.renderList(res, scope)
 }
 
 // showDetail pushes a Detail view for id onto the stack.
@@ -32,6 +40,21 @@ func (s *Shell) showDetail(resourceName, id string) {
 
 	s.stack.Push(View{ResourceName: res.Name(), Kind: DetailKind, SelectedID: id})
 	s.renderDetail(res, id)
+}
+
+// pushScopedList pushes a List view scoped to scope onto the stack — what a
+// DetailAction with Kind: NavScopedList triggers. Unlike switchResource,
+// this pushes rather than resets, so Esc returns to the view that launched
+// it.
+func (s *Shell) pushScopedList(resourceName, scope string) {
+	res, ok := s.registry.Resolve(resourceName)
+	if !ok {
+		s.showError(resourceName, fmt.Errorf("unknown resource %q", resourceName), func() {})
+		return
+	}
+
+	s.stack.Push(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope})
+	s.renderList(res, scope)
 }
 
 // goBack pops the top view and re-renders the new top, or quits if the
@@ -56,13 +79,13 @@ func (s *Shell) goBack() {
 
 	switch top.Kind {
 	case ListKind:
-		s.renderList(res)
+		s.renderList(res, top.Scope)
 	case DetailKind:
 		s.renderDetail(res, top.SelectedID)
 	}
 }
 
-func (s *Shell) renderList(res resource.Resource) {
+func (s *Shell) renderList(res resource.Resource, scope string) {
 	s.closeFooterInput()
 	s.filterQuery = ""
 	s.currentListResource = res.Name()
@@ -73,26 +96,38 @@ func (s *Shell) renderList(res resource.Resource) {
 	s.content.SwitchToPage(pageTable)
 	s.app.SetFocus(s.table)
 
-	s.startRefreshLoop(res.Name(), "", res.RefreshInterval())
-	s.loadList(res, true)
+	s.startRefreshLoop(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope}, res.RefreshInterval())
+	s.loadList(res, scope, true)
 }
 
-// loadList fetches List() in the background. isInitial distinguishes a
-// first/navigation load (failure shows a full-screen error with retry) from
-// a background refresh tick (failure shows a transient warning and keeps
-// the last-good render).
-func (s *Shell) loadList(res resource.Resource, isInitial bool) {
+// loadList fetches List() (or, if scope is non-empty, ScopedList(scope)) in
+// the background. isInitial distinguishes a first/navigation load (failure
+// shows a full-screen error with retry) from a background refresh tick
+// (failure shows a transient warning and keeps the last-good render).
+func (s *Shell) loadList(res resource.Resource, scope string, isInitial bool) {
 	go func() {
-		rows, err := res.List()
+		var rows []resource.Row
+		var err error
+
+		if scope != "" {
+			scoped, ok := res.(resource.ScopedResource)
+			if !ok {
+				err = fmt.Errorf("%s does not support a scoped list", res.Name())
+			} else {
+				rows, err = scoped.ScopedList(scope)
+			}
+		} else {
+			rows, err = res.List()
+		}
+
 		s.app.QueueUpdateDraw(func() {
-			top, ok := s.stack.Top()
-			if !ok || top.ResourceName != res.Name() || top.Kind != ListKind {
+			if !s.isTopView(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope}) {
 				return
 			}
 
 			if err != nil {
 				if isInitial {
-					s.showError(res.Name(), err, func() { s.renderList(res) })
+					s.showError(res.Name(), err, func() { s.renderList(res, scope) })
 				} else {
 					s.showTransientWarning(fmt.Sprintf("refresh failed: %s", err))
 				}
@@ -118,7 +153,7 @@ func (s *Shell) renderDetail(res resource.Resource, id string) {
 	s.content.SwitchToPage(pageDetail)
 	s.app.SetFocus(s.detail)
 
-	s.startRefreshLoop(res.Name(), id, res.RefreshInterval())
+	s.startRefreshLoop(View{ResourceName: res.Name(), Kind: DetailKind, SelectedID: id}, res.RefreshInterval())
 	s.loadDetail(res, id, true)
 }
 
@@ -126,8 +161,7 @@ func (s *Shell) loadDetail(res resource.Resource, id string, isInitial bool) {
 	go func() {
 		detail, err := res.Describe(id)
 		s.app.QueueUpdateDraw(func() {
-			top, ok := s.stack.Top()
-			if !ok || top.ResourceName != res.Name() || top.Kind != DetailKind || top.SelectedID != id {
+			if !s.isTopView(View{ResourceName: res.Name(), Kind: DetailKind, SelectedID: id}) {
 				return
 			}
 

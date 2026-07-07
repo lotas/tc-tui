@@ -53,3 +53,26 @@ func TestViewStackResetTo(t *testing.T) {
 		t.Fatalf("unexpected top after ResetTo: %+v, %v", top, ok)
 	}
 }
+
+func TestViewStackPreservesScope(t *testing.T) {
+	s := NewViewStack()
+	s.Push(View{ResourceName: "workers", Kind: ListKind, Scope: "gcp/pool-a"})
+
+	top, ok := s.Top()
+	if !ok || top.Scope != "gcp/pool-a" {
+		t.Fatalf("unexpected top: %+v, %v", top, ok)
+	}
+
+	popped, ok := s.Pop()
+	if !ok || popped.Scope != "gcp/pool-a" {
+		t.Fatalf("unexpected pop: %+v, %v", popped, ok)
+	}
+
+	s.Push(View{ResourceName: "workers", Kind: ListKind, Scope: "gcp/pool-a"})
+	s.ResetTo(View{ResourceName: "roles", Kind: ListKind})
+
+	top, ok = s.Top()
+	if !ok || top.Scope != "" {
+		t.Fatalf("expected ResetTo to clear scope, got: %+v, %v", top, ok)
+	}
+}

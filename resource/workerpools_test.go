@@ -75,6 +75,14 @@ func TestWorkerPoolsResourceDescribe(t *testing.T) {
 	if detail.Title != "Worker Pool :: proj/pool-a" {
 		t.Fatalf("unexpected title: %s", detail.Title)
 	}
+	if len(detail.Actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(detail.Actions))
+	}
+	action := detail.Actions[0]
+	if action.Key != 'w' || action.Target.ResourceName != "workers" ||
+		action.Target.ID != "proj/pool-a" || action.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action: %+v", action)
+	}
 	if !strings.Contains(detail.Body, "a pool") || !strings.Contains(detail.Body, "owner@example.com") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}

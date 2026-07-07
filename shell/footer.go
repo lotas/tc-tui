@@ -1,6 +1,8 @@
 package shell
 
 import (
+	"strings"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -59,9 +61,9 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 	case tcell.KeyEnter:
 		switch s.footerMode {
 		case footerCommand:
-			target := s.footerInput.GetText()
+			name, scope := splitCommand(s.footerInput.GetText())
 			s.closeFooterInput()
-			s.switchResource(target)
+			s.switchResource(name, scope)
 		case footerFilter:
 			s.filterQuery = s.footerInput.GetText()
 			s.closeFooterInput()
@@ -73,4 +75,17 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 		}
 		s.closeFooterInput()
 	}
+}
+
+// splitCommand splits a command-bar input into a resource name and an
+// optional scope argument: the remaining whitespace-separated fields,
+// re-joined with a single space each (surrounding/repeated whitespace is
+// normalized, not preserved literally).
+func splitCommand(input string) (name, scope string) {
+	fields := strings.Fields(input)
+	if len(fields) == 0 {
+		return "", ""
+	}
+
+	return fields[0], strings.Join(fields[1:], " ")
 }

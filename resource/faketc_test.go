@@ -17,6 +17,11 @@ type fakeTaskcluster struct {
 	workerPoolsErr error
 	workerPool     *tcworkermanager.WorkerPoolFullDefinition
 	workerPoolErr  error
+
+	workers    taskcluster.WorkerList
+	workersErr error
+	worker     *tcworkermanager.WorkerFullDefinition
+	workerErr  error
 }
 
 func (f *fakeTaskcluster) GetVersion() taskcluster.Version { return taskcluster.Version{} }
@@ -38,4 +43,12 @@ func (f *fakeTaskcluster) GetWorkerPools() (taskcluster.WorkerPoolList, error) {
 
 func (f *fakeTaskcluster) GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error) {
 	return f.workerPool, f.workerPoolErr
+}
+
+func (f *fakeTaskcluster) GetWorkersForWorkerPool(workerPoolID string) (taskcluster.WorkerList, error) {
+	return f.workers, f.workersErr
+}
+
+func (f *fakeTaskcluster) GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error) {
+	return f.worker, f.workerErr
 }

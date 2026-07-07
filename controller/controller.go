@@ -23,6 +23,7 @@ func NewController() TcController {
 	registry := resource.NewRegistry()
 	registry.Register(resource.NewRolesResource(tc))
 	registry.Register(resource.NewWorkerPoolsResource(tc))
+	registry.Register(resource.NewWorkersResource(tc))
 
 	return &Controller{
 		tc:    tc,
