@@ -59,6 +59,9 @@ type Shell struct {
 	filterQuery          string
 	currentDetailActions []resource.DetailAction
 
+	currentSort    SortState
+	sortByResource map[string]SortState
+
 	activeContent tview.Primitive
 
 	stopRefresh chan struct{}
@@ -66,9 +69,10 @@ type Shell struct {
 
 func New(registry *resource.Registry) *Shell {
 	s := &Shell{
-		app:      tview.NewApplication(),
-		registry: registry,
-		stack:    NewViewStack(),
+		app:            tview.NewApplication(),
+		registry:       registry,
+		stack:          NewViewStack(),
+		sortByResource: make(map[string]SortState),
 	}
 	s.init()
 
@@ -164,6 +168,11 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	case event.Rune() == '/':
 		if name, _ := s.content.GetFrontPage(); name == pageTable {
 			s.openFilter()
+		}
+		return nil
+	case event.Rune() >= '1' && event.Rune() <= '9':
+		if name, _ := s.content.GetFrontPage(); name == pageTable {
+			s.toggleSort(int(event.Rune() - '1'))
 		}
 		return nil
 	case event.Rune() == '?':

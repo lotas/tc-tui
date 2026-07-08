@@ -57,7 +57,7 @@ func (s *Shell) handleFooterInputChanged(text string) {
 	}
 
 	s.filterQuery = text
-	s.table.SetData(s.currentColumns, FilterRows(s.lastRows, s.filterQuery))
+	s.refreshTable()
 }
 
 func (s *Shell) handleFooterInputDone(key tcell.Key) {
@@ -79,7 +79,7 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 	case tcell.KeyEscape:
 		if s.footerMode == footerFilter {
 			s.filterQuery = ""
-			s.table.SetData(s.currentColumns, s.lastRows)
+			s.refreshTable()
 		}
 		s.closeFooterInput()
 	}

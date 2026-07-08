@@ -69,14 +69,32 @@ func (t *TableView) SetOnSelect(fn func(id string)) {
 	t.onSelect = fn
 }
 
+// ResetSelection forgets the remembered selection, so the next SetData call
+// falls back to selecting the top row instead of trying to restore the
+// cursor to wherever it was — used when a sort change reorders the list
+// enough that "the same row" no longer means the same thing to the user.
+func (t *TableView) ResetSelection() {
+	t.lastSelectedID = ""
+}
+
 // SetData replaces the table's header and rows. Row IDs are stashed on
 // each row's first cell via SetReference so selection can look them up
-// without a separate index-to-ID slice.
-func (t *TableView) SetData(columns []resource.Column, rows []resource.Row) {
+// without a separate index-to-ID slice. If sort.Direction is not SortNone,
+// a ▲/▼ indicator is appended to that column's header text.
+func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort SortState) {
 	t.Clear()
 
 	for col, column := range columns {
-		cell := tview.NewTableCell(column.Title).
+		title := column.Title
+		if sort.Direction != SortNone && col == sort.Column {
+			if sort.Direction == SortAsc {
+				title += " ▲"
+			} else {
+				title += " ▼"
+			}
+		}
+
+		cell := tview.NewTableCell(title).
 			SetTextColor(tview.Styles.SecondaryTextColor).
 			SetSelectable(false).
 			SetAttributes(tcell.AttrBold)

@@ -41,6 +41,16 @@ func TestBuildHelpTextListsGlobalKeys(t *testing.T) {
 	}
 }
 
+func TestBuildHelpTextExplainsSorting(t *testing.T) {
+	text := buildHelpText(resource.NewRegistry())
+
+	for _, want := range []string{"1-9", "sort", "reverse"} {
+		if !strings.Contains(strings.ToLower(text), strings.ToLower(want)) {
+			t.Errorf("buildHelpText() missing sorting explanation containing %q\ngot:\n%s", want, text)
+		}
+	}
+}
+
 func TestBuildHelpTextListsPlainResource(t *testing.T) {
 	registry := resource.NewRegistry()
 	registry.Register(fakeResource{

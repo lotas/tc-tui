@@ -85,15 +85,50 @@ func (s *Shell) goBack() {
 	}
 }
 
+// toggleSort updates the active sort for the current list view: pressing
+// the same column again reverses direction; any other column starts fresh
+// at ascending. The result is remembered per-resource in sortByResource so
+// it's restored the next time this resource is switched to.
+func (s *Shell) toggleSort(column int) {
+	if column < 0 || column >= len(s.currentColumns) {
+		return
+	}
+
+	if s.currentSort.Direction != SortNone && s.currentSort.Column == column {
+		if s.currentSort.Direction == SortAsc {
+			s.currentSort.Direction = SortDesc
+		} else {
+			s.currentSort.Direction = SortAsc
+		}
+	} else {
+		s.currentSort = SortState{Column: column, Direction: SortAsc}
+	}
+
+	s.sortByResource[s.currentListResource] = s.currentSort
+	s.table.ResetSelection()
+	s.refreshTable()
+}
+
+// refreshTable recomputes the table's displayed rows from s.lastRows by
+// applying the current filter then the current sort, and re-renders. This
+// is the single place list-view rows get filtered/sorted — call it any
+// time s.lastRows, s.filterQuery, or s.currentSort changes.
+func (s *Shell) refreshTable() {
+	rows := FilterRows(s.lastRows, s.filterQuery)
+	rows = SortRows(rows, s.currentSort)
+	s.table.SetData(s.currentColumns, rows, s.currentSort)
+}
+
 func (s *Shell) renderList(res resource.Resource, scope string) {
 	s.currentDetailActions = nil
 	s.closeFooterInput()
 	s.filterQuery = ""
 	s.currentListResource = res.Name()
 	s.currentColumns = res.Columns()
+	s.currentSort = s.sortByResource[res.Name()] // zero value (SortNone) if not yet sorted
 
 	s.setTitle("Loading " + res.Name() + "...")
-	s.table.SetData(s.currentColumns, nil)
+	s.table.SetData(s.currentColumns, nil, s.currentSort)
 	s.content.SwitchToPage(pageTable)
 	s.app.SetFocus(s.table)
 
@@ -136,7 +171,7 @@ func (s *Shell) loadList(res resource.Resource, scope string, isInitial bool) {
 			}
 
 			s.lastRows = rows
-			s.table.SetData(s.currentColumns, FilterRows(rows, s.filterQuery))
+			s.refreshTable()
 			s.activeContent = s.table
 			s.setTitle(res.Name())
 			if s.footerMode == footerHints {

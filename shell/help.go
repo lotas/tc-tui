@@ -37,6 +37,8 @@ func buildHelpText(registry *resource.Registry) string {
 	b.WriteString("  [yellow]q[white]     quit from any view\n")
 	b.WriteString("  [yellow]:[white]     open the command bar (switch resource, e.g. `:workerpools`, `:wp`, `:workers <poolId>`, `:help`)\n")
 	b.WriteString("  [yellow]/[white]     filter the current list (list views only)\n")
+	b.WriteString("  [yellow]1-9[white]   sort the current list by that column, numbered left to right " +
+		"(list views only) — press the same digit again to reverse direction\n")
 	b.WriteString("  [yellow]Esc[white]   go back / quit at the root\n")
 	b.WriteString("  [yellow]?[white]     toggle this help screen\n\n")
 
