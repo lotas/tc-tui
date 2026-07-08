@@ -53,8 +53,9 @@ type Detail struct {
 // The shell is generic over this interface and never references a concrete
 // resource type.
 type Resource interface {
-	Name() string      // e.g. "workerpools" — matched in the command bar
-	Aliases() []string // e.g. ["wp", "pools"]
+	Name() string        // e.g. "workerpools" — matched in the command bar
+	Aliases() []string   // e.g. ["wp", "pools"]
+	Description() string // one-line summary shown on the help screen
 	Columns() []Column
 	List() ([]Row, error)
 	Describe(id string) (Detail, error)

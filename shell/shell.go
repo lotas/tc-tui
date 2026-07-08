@@ -13,6 +13,7 @@ const (
 	pageTable  = "table"
 	pageDetail = "detail"
 	pageError  = "error"
+	pageHelp   = "help"
 
 	pageFooterHints = "hints"
 	pageFooterInput = "input"
@@ -42,6 +43,10 @@ type Shell struct {
 	table     *TableView
 	detail    *DetailView
 	errorView *ErrorView
+	helpView  *HelpView
+
+	helpOpen    bool
+	preHelpPage string
 
 	footer      *tview.Pages
 	footerHint  *tview.TextView
@@ -93,11 +98,13 @@ func (s *Shell) init() {
 	})
 
 	s.errorView = NewErrorView()
+	s.helpView = NewHelpView()
 
 	s.content = tview.NewPages().
 		AddPage(pageTable, s.table, true, true).
 		AddPage(pageDetail, s.detail, true, false).
-		AddPage(pageError, s.errorView, true, false)
+		AddPage(pageError, s.errorView, true, false).
+		AddPage(pageHelp, s.helpView, true, false)
 	s.content.SetBorder(true)
 	s.activeContent = s.table
 
@@ -114,16 +121,40 @@ func (s *Shell) init() {
 }
 
 // globalInputCapture handles keys that apply regardless of which content
-// view has focus: `:` opens the command bar, `/` opens the filter (list
-// views only), Esc pops the view stack (or quits, at the root). While the
-// footer input is active, every key passes through untouched so it can be
-// typed into the input field.
+// view has focus: `q` quits from navigable views, `:` opens the command bar,
+// `/` opens the filter (list views only), `?` toggles the help overlay, and
+// Esc pops the view stack (or quits at the root, or closes help if open).
+// While the footer input is active, every key passes through untouched so it
+// can be typed into the input field. While help is open, every key is
+// swallowed except q, Esc/`?`, and the scroll keys.
 func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
+	if s.helpOpen {
+		if s.footerMode == footerHints && isQuitKey(event) {
+			s.Stop()
+			return nil
+		}
+
+		switch event.Key() {
+		case tcell.KeyEscape:
+			s.closeHelp()
+			return nil
+		case tcell.KeyUp, tcell.KeyDown, tcell.KeyPgUp, tcell.KeyPgDn, tcell.KeyHome, tcell.KeyEnd:
+			return event // let the HelpView TextView scroll
+		}
+		if event.Rune() == '?' {
+			s.closeHelp()
+		}
+		return nil
+	}
+
 	if s.footerMode != footerHints {
 		return event
 	}
 
 	switch {
+	case isQuitKey(event):
+		s.Stop()
+		return nil
 	case event.Key() == tcell.KeyEscape:
 		s.goBack()
 		return nil
@@ -135,9 +166,16 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			s.openFilter()
 		}
 		return nil
+	case event.Rune() == '?':
+		s.openHelp()
+		return nil
 	}
 
 	return event
+}
+
+func isQuitKey(event *tcell.EventKey) bool {
+	return event.Key() == tcell.KeyRune && event.Rune() == 'q'
 }
 
 func (s *Shell) setTitle(title string) {
@@ -176,4 +214,30 @@ func (s *Shell) Start(rootResource string) error {
 func (s *Shell) Stop() {
 	s.stopRefreshLoop()
 	s.app.Stop()
+}
+
+// openHelp swaps the content area to the help overlay, remembering which
+// page was showing so closeHelp can restore it exactly. It does not touch
+// s.stack or the active refresh loop — help is not a navigable place.
+func (s *Shell) openHelp() {
+	if s.helpOpen {
+		return
+	}
+
+	s.preHelpPage, _ = s.content.GetFrontPage()
+	s.helpOpen = true
+	s.helpView.SetData(buildHelpText(s.registry))
+	s.content.SwitchToPage(pageHelp)
+	s.app.SetFocus(s.helpView)
+}
+
+// closeHelp restores whatever content page was showing before openHelp.
+func (s *Shell) closeHelp() {
+	if !s.helpOpen {
+		return
+	}
+
+	s.helpOpen = false
+	s.content.SwitchToPage(s.preHelpPage)
+	s.app.SetFocus(s.activeContent)
 }

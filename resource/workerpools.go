@@ -17,6 +17,9 @@ func NewWorkerPoolsResource(tc taskcluster.Taskcluster) *WorkerPoolsResource {
 
 func (r *WorkerPoolsResource) Name() string      { return "workerpools" }
 func (r *WorkerPoolsResource) Aliases() []string { return []string{"wp", "pools"} }
+func (r *WorkerPoolsResource) Description() string {
+	return "Worker pool provisioning configuration — provider, capacity, launch config"
+}
 
 func (r *WorkerPoolsResource) Columns() []Column {
 	return []Column{

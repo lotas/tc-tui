@@ -16,8 +16,9 @@ func NewRolesResource(tc taskcluster.Taskcluster) *RolesResource {
 	return &RolesResource{tc: tc}
 }
 
-func (r *RolesResource) Name() string      { return "roles" }
-func (r *RolesResource) Aliases() []string { return []string{"role"} }
+func (r *RolesResource) Name() string        { return "roles" }
+func (r *RolesResource) Aliases() []string   { return []string{"role"} }
+func (r *RolesResource) Description() string { return "IAM-style roles and the scopes they grant" }
 
 func (r *RolesResource) Columns() []Column {
 	return []Column{{Title: "ROLE ID"}}

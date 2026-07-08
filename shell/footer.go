@@ -22,7 +22,7 @@ func (s *Shell) initFooter() {
 }
 
 func (s *Shell) renderFooterHints() {
-	hint := " [yellow]:[white] command   [yellow]/[white] filter   [yellow]Esc[white] back/quit"
+	hint := " [yellow]q[white] quit   [yellow]:[white] command   [yellow]/[white] filter   [yellow]Esc[white] back/quit   [yellow]?[white] help"
 	for _, action := range s.currentDetailActions {
 		hint += fmt.Sprintf("   [yellow]<%c>[white] %s", action.Key, action.Label)
 	}
@@ -67,7 +67,11 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 		case footerCommand:
 			name, scope := splitCommand(s.footerInput.GetText())
 			s.closeFooterInput()
-			s.switchResource(name, scope)
+			if strings.EqualFold(name, "help") {
+				s.openHelp()
+			} else {
+				s.switchResource(name, scope)
+			}
 		case footerFilter:
 			s.filterQuery = s.footerInput.GetText()
 			s.closeFooterInput()

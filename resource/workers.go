@@ -25,6 +25,9 @@ func NewWorkersResource(tc taskcluster.Taskcluster) *WorkersResource {
 
 func (r *WorkersResource) Name() string      { return "workers" }
 func (r *WorkersResource) Aliases() []string { return []string{"w"} }
+func (r *WorkersResource) Description() string {
+	return "Individual workers within a worker pool (scoped list)"
+}
 
 func (r *WorkersResource) Columns() []Column {
 	return []Column{

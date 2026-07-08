@@ -12,6 +12,7 @@ type stubResource struct {
 
 func (s stubResource) Name() string                       { return s.name }
 func (s stubResource) Aliases() []string                  { return s.aliases }
+func (s stubResource) Description() string                { return "" }
 func (s stubResource) Columns() []Column                  { return nil }
 func (s stubResource) List() ([]Row, error)               { return nil, nil }
 func (s stubResource) Describe(id string) (Detail, error) { return Detail{}, nil }
