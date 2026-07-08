@@ -39,12 +39,14 @@ type fakeServerFacetedListResource struct {
 	rows    map[string][]resource.Row
 	counts  map[string]int
 	err     error
+	ttl     time.Duration // overrides fakeResource's default RefreshInterval() of 0
 
 	mu    sync.Mutex
 	calls []string // records the `value` FacetList was called with, in order
 }
 
-func (f *fakeServerFacetedListResource) FacetOptions() []string { return f.options }
+func (f *fakeServerFacetedListResource) RefreshInterval() time.Duration { return f.ttl }
+func (f *fakeServerFacetedListResource) FacetOptions() []string         { return f.options }
 func (f *fakeServerFacetedListResource) FacetList(scope, value string) ([]resource.Row, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, value)
@@ -214,6 +216,60 @@ func TestCycleFacetServerSideTriggersRefetch(t *testing.T) {
 	waitFor(t, func() bool {
 		last, ok := res.lastCall()
 		return ok && last == "stopped"
+	})
+}
+
+func TestLoadListServesFromCacheWithoutFetching(t *testing.T) {
+	s := New(resource.NewRegistry())
+	res := &fakeServerFacetedListResource{
+		fakeResource: fakeResource{name: "workers"},
+		ttl:          time.Minute,
+		options:      []string{"running"},
+	}
+	s.currentListResource = "workers"
+	s.currentColumns = []resource.Column{{Title: "STATE"}}
+	s.currentServerFaceted = res
+	s.currentFacetValue = "running"
+	s.cache.set(cacheKeyFor(res, "pool-a", "running"), cacheEntry{
+		rows:      []resource.Row{{ID: "cached", Cells: []string{"running"}}},
+		fetchedAt: time.Now(),
+	})
+
+	s.loadList(res, "pool-a", "running", true, false)
+
+	if len(s.lastRows) != 1 || s.lastRows[0].ID != "cached" {
+		t.Fatalf("expected cache-hit rows to be applied, got %+v", s.lastRows)
+	}
+	if _, called := res.lastCall(); called {
+		t.Fatalf("expected no fetch on a cache hit, but FacetList was called")
+	}
+}
+
+func TestLoadListForceRefreshBypassesCache(t *testing.T) {
+	s := New(resource.NewRegistry())
+	res := &fakeServerFacetedListResource{
+		fakeResource: fakeResource{name: "workers"},
+		ttl:          time.Minute,
+		options:      []string{"running"},
+		rows: map[string][]resource.Row{
+			"running": {{ID: "fresh", Cells: []string{"running"}}},
+		},
+	}
+	s.currentListResource = "workers"
+	s.currentColumns = []resource.Column{{Title: "STATE"}}
+	s.currentServerFaceted = res
+	s.currentFacetValue = "running"
+	s.stack.Push(View{ResourceName: "workers", Kind: ListKind, Scope: "pool-a"})
+	s.cache.set(cacheKeyFor(res, "pool-a", "running"), cacheEntry{
+		rows:      []resource.Row{{ID: "stale", Cells: []string{"running"}}},
+		fetchedAt: time.Now(),
+	})
+
+	s.loadList(res, "pool-a", "running", false, true)
+
+	waitFor(t, func() bool {
+		_, called := res.lastCall()
+		return called
 	})
 }
 

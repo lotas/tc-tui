@@ -3,6 +3,7 @@ package shell
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/taskcluster/tc-tui/resource"
 )
@@ -115,7 +116,7 @@ func (s *Shell) cycleFacet(direction int) {
 		res := s.currentServerFaceted
 		s.setTitle("Loading " + res.Name() + "...")
 		s.table.SetData(s.currentColumns, nil, s.currentSort)
-		s.loadList(res, top.Scope, s.currentFacetValue, true)
+		s.loadList(res, top.Scope, s.currentFacetValue, true, false)
 
 	case s.currentFaceted != nil:
 		rows := FilterRows(s.lastRows, s.filterQuery)
@@ -252,7 +253,7 @@ func (s *Shell) renderList(res resource.Resource, scope string) {
 	s.app.SetFocus(s.table)
 
 	s.startRefreshLoop(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope}, res.RefreshInterval())
-	s.loadList(res, scope, s.currentFacetValue, true)
+	s.loadList(res, scope, s.currentFacetValue, true, false)
 }
 
 // restoreFacetValue returns the remembered facet value for name if it's
@@ -273,18 +274,49 @@ func (s *Shell) restoreFacetValue(sf resource.ServerFaceted, name string) string
 	return options[0]
 }
 
-// loadList fetches this view's rows in the background: via
-// ServerFaceted.FacetList(scope, facetValue) if the resource implements it,
-// otherwise via ScopedList(scope) (if scope is non-empty) or List(). Passing
-// facetValue explicitly (rather than reading s.currentFacetValue from this
-// goroutine) avoids a data race with a UI-thread tab switch, and re-checking
-// it on completion discards a slow fetch that a newer tab switch has since
-// superseded. isInitial distinguishes a first/navigation load (failure shows
-// a full-screen error with retry) from a background refresh tick or tab
-// switch that hasn't (failure shows a transient warning and keeps the
-// last-good render) — tab switches themselves pass isInitial=true, since
-// they're a deliberate user action.
-func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInitial bool) {
+// applyListResult renders a successfully fetched (or cache-hit) list result:
+// shared by loadList's synchronous cache-hit path and its async fetch-success
+// path.
+func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, counts map[string]int) {
+	s.lastRows = rows
+	if counts != nil {
+		s.currentFacetCounts = counts
+	}
+	s.refreshTable()
+	s.activeContent = s.table
+	s.setTitle(res.Name())
+	if s.footerMode == footerHints {
+		s.renderFooterHints()
+	}
+}
+
+// loadList fetches this view's rows: via ServerFaceted.FacetList(scope,
+// facetValue) if the resource implements it, otherwise via ScopedList(scope)
+// (if scope is non-empty) or List(). Passing facetValue explicitly (rather
+// than reading s.currentFacetValue from the fetch goroutine) avoids a data
+// race with a UI-thread tab switch, and re-checking it on completion
+// discards a slow fetch that a newer tab switch has since superseded.
+// isInitial distinguishes a first/navigation load (failure shows a
+// full-screen error with retry) from a background refresh tick that hasn't
+// (failure shows a transient warning and keeps the last-good render) — tab
+// switches themselves pass isInitial=true, since they're a deliberate user
+// action.
+//
+// Unless forceRefresh is set, this first checks the cache for this
+// (resource, scope, facetValue) key and, on a hit, applies it synchronously
+// — no goroutine, no network call. forceRefresh is set only by the
+// auto-refresh ticker (Invalidate), whose whole purpose is to get a
+// genuinely fresh result for the view currently on screen.
+func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInitial, forceRefresh bool) {
+	key := cacheKeyFor(res, scope, facetValue)
+
+	if !forceRefresh {
+		if entry, ok := s.cache.get(key, res.RefreshInterval()); ok {
+			s.applyListResult(res, entry.rows, entry.counts)
+			return
+		}
+	}
+
 	go func() {
 		var rows []resource.Row
 		var counts map[string]int
@@ -323,16 +355,8 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 				return
 			}
 
-			s.lastRows = rows
-			if counts != nil {
-				s.currentFacetCounts = counts
-			}
-			s.refreshTable()
-			s.activeContent = s.table
-			s.setTitle(res.Name())
-			if s.footerMode == footerHints {
-				s.renderFooterHints()
-			}
+			s.cache.set(key, cacheEntry{rows: rows, counts: counts, fetchedAt: time.Now()})
+			s.applyListResult(res, rows, counts)
 		})
 	}()
 }

@@ -75,6 +75,8 @@ type Shell struct {
 	activeContent tview.Primitive
 
 	stopRefresh chan struct{}
+
+	cache *listCache
 }
 
 func New(registry *resource.Registry) *Shell {
@@ -84,6 +86,7 @@ func New(registry *resource.Registry) *Shell {
 		stack:           NewViewStack(),
 		sortByResource:  make(map[string]SortState),
 		facetByResource: make(map[string]string),
+		cache:           newListCache(),
 	}
 	s.init()
 
