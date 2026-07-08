@@ -23,9 +23,10 @@ func (r *WorkerPoolsResource) Description() string {
 
 func (r *WorkerPoolsResource) Columns() []Column {
 	return []Column{
-		{Title: "PROVIDER", Width: 20},
 		{Title: "WORKER POOL ID"},
-		{Title: "CAPACITY", Width: 12},
+		{Title: "PROVIDER", Width: 32},
+		{Title: "CAPACITY", Width: 16},
+		{Title: "REQUESTED", Width: 16},
 	}
 }
 
@@ -40,9 +41,10 @@ func (r *WorkerPoolsResource) List() ([]Row, error) {
 		rows = append(rows, Row{
 			ID: pool.WorkerPoolID,
 			Cells: []string{
-				pool.ProviderID,
 				pool.WorkerPoolID,
-				fmt.Sprintf("%d / %d", pool.CurrentCapacity, pool.RequestedCapacity),
+				pool.ProviderID,
+				fmt.Sprintf("%10d", pool.CurrentCapacity),
+				fmt.Sprintf("%10d", pool.RequestedCapacity),
 			},
 		})
 	}

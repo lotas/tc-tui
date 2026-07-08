@@ -35,7 +35,8 @@ func TestWorkerPoolsResourceList(t *testing.T) {
 	if rows[0].ID != "proj/pool-a" {
 		t.Fatalf("unexpected id: %s", rows[0].ID)
 	}
-	if rows[0].Cells[0] != "gcp" || rows[0].Cells[1] != "proj/pool-a" || rows[0].Cells[2] != "3 / 5" {
+	if rows[0].Cells[0] != "gcp" || rows[0].Cells[1] != "proj/pool-a" ||
+		rows[0].Cells[2] != "3" || rows[0].Cells[3] != "5" {
 		t.Fatalf("unexpected cells: %+v", rows[0].Cells)
 	}
 }

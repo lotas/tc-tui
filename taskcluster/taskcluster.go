@@ -115,6 +115,38 @@ func (tc *TC) GetWorkerPools() (WorkerPoolList, error) {
 		return nil, err
 	}
 
+	stats, err := paginate(func(cont string) ([]tcworkermanager.Var3, string, error) {
+		resp, err := tc.wm.ListWorkerPoolsStats(cont, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.WorkerPoolsStats, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	statsByID := make(map[string]tcworkermanager.Var3, len(stats))
+	for _, s := range stats {
+		statsByID[s.WorkerPoolID] = s
+	}
+
+	for i, pool := range pools {
+		s, ok := statsByID[pool.WorkerPoolID]
+		if !ok {
+			continue
+		}
+		pools[i].CurrentCapacity = s.CurrentCapacity
+		pools[i].RequestedCapacity = s.RequestedCapacity
+		pools[i].RequestedCount = s.RequestedCount
+		pools[i].RunningCapacity = s.RunningCapacity
+		pools[i].RunningCount = s.RunningCount
+		pools[i].StoppedCapacity = s.StoppedCapacity
+		pools[i].StoppedCount = s.StoppedCount
+		pools[i].StoppingCapacity = s.StoppingCapacity
+		pools[i].StoppingCount = s.StoppingCount
+	}
+
 	return WorkerPoolList(pools), nil
 }
 
