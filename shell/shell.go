@@ -63,6 +63,7 @@ type Shell struct {
 	sortByResource map[string]SortState
 
 	tabsBar        *tview.TextView
+	tabsSeparator  *tview.TextView
 	tableContainer *tview.Flex
 
 	currentFaceted       resource.Faceted
@@ -102,8 +103,11 @@ func (s *Shell) init() {
 	})
 
 	s.tabsBar = tview.NewTextView().SetDynamicColors(true)
+	s.tabsSeparator = tview.NewTextView().SetDynamicColors(true).
+		SetTextColor(tview.Styles.SecondaryTextColor)
 	s.tableContainer = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(s.tabsBar, 0, 0, false).
+		AddItem(s.tabsSeparator, 0, 0, false).
 		AddItem(s.table, 0, 1, true)
 
 	s.detail = NewDetailView()

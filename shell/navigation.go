@@ -174,8 +174,11 @@ func (s *Shell) refreshTable() {
 
 // renderTabsBar recomputes and redraws the facet tab bar from rows (used
 // only by the client-side Faceted case; ServerFaceted reads
-// s.currentFacetCounts instead, ignoring rows), collapsing the bar entirely
-// when the current resource has no facets.
+// s.currentFacetCounts instead, ignoring rows), collapsing the bar (and its
+// separator line) entirely when the current resource has no facets. Each
+// tab is rendered as its own colored "pill" — a bright highlight for the
+// active tab, a muted one for the rest — with a horizontal rule underneath
+// to separate the bar from the table.
 func (s *Shell) renderTabsBar(rows []resource.Row) {
 	var tabs []FacetTab
 	switch {
@@ -185,16 +188,20 @@ func (s *Shell) renderTabsBar(rows []resource.Row) {
 		tabs = ClientFacetTabs(s.currentFaceted, rows)
 	default:
 		s.tableContainer.ResizeItem(s.tabsBar, 0, 0)
+		s.tableContainer.ResizeItem(s.tabsSeparator, 0, 0)
 		s.tabsBar.SetText("")
+		s.tabsSeparator.SetText("")
 		return
 	}
 
 	s.tableContainer.ResizeItem(s.tabsBar, 1, 0)
+	s.tableContainer.ResizeItem(s.tabsSeparator, 1, 0)
+	s.tabsSeparator.SetText(strings.Repeat("─", 300)) // clipped to whatever width is available
 
 	var b strings.Builder
 	for i, tab := range tabs {
 		if i > 0 {
-			b.WriteString("   ")
+			b.WriteString(" ")
 		}
 
 		label := tab.Value
@@ -204,9 +211,13 @@ func (s *Shell) renderTabsBar(rows []resource.Row) {
 		text := fmt.Sprintf("%s (%d)", label, tab.Count)
 
 		if tab.Value == s.currentFacetValue {
-			b.WriteString("[yellow::b]" + text + "[-:-:-]")
+			// White-on-blue rather than black-on-yellow: named colors like
+			// "black"/"gray" get remapped unpredictably by terminal themes
+			// and can end up low-contrast or oddly tinted; white text on a
+			// solid blue fill reads reliably across terminals.
+			b.WriteString(fmt.Sprintf("[white:blue:b] %s [-:-:-]", text))
 		} else {
-			b.WriteString(text)
+			b.WriteString(fmt.Sprintf("[white] %s ", text))
 		}
 	}
 
