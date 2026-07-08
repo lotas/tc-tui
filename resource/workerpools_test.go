@@ -99,3 +99,40 @@ func TestWorkerPoolsResourceDescribeError(t *testing.T) {
 		t.Fatalf("expected %v, got %v", wantErr, err)
 	}
 }
+
+func TestWorkerPoolsResourceFacetColumn(t *testing.T) {
+	res := NewWorkerPoolsResource(&fakeTaskcluster{})
+
+	if got := res.FacetColumn(); got != 1 {
+		t.Fatalf("expected column 1 (PROVIDER), got %d", got)
+	}
+}
+
+func TestWorkerPoolsResourceFacetOptionsDedupsAndSorts(t *testing.T) {
+	res := NewWorkerPoolsResource(&fakeTaskcluster{})
+	rows := []Row{
+		{ID: "a", Cells: []string{"proj/pool-a", "gcp", "1", "1"}},
+		{ID: "b", Cells: []string{"proj/pool-b", "aws", "1", "1"}},
+		{ID: "c", Cells: []string{"proj/pool-c", "gcp", "1", "1"}},
+	}
+
+	got := res.FacetOptions(rows)
+	want := []string{"aws", "gcp"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
+	}
+}
+
+func TestWorkerPoolsResourceFacetOptionsEmptyRows(t *testing.T) {
+	res := NewWorkerPoolsResource(&fakeTaskcluster{})
+
+	got := res.FacetOptions(nil)
+	if len(got) != 0 {
+		t.Fatalf("expected no options, got %v", got)
+	}
+}

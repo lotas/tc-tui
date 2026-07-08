@@ -44,12 +44,40 @@ func (r *WorkersResource) List() ([]Row, error) {
 	return nil, fmt.Errorf("workers requires a worker pool scope")
 }
 
-func (r *WorkersResource) ScopedList(workerPoolID string) ([]Row, error) {
-	workers, err := r.tc.GetWorkersForWorkerPool(workerPoolID)
+// FacetOptions returns the states worker-manager defines, "running" first
+// since it's the most commonly useful default tab.
+func (r *WorkersResource) FacetOptions() []string {
+	return []string{"running", "requested", "stopping", "stopped"}
+}
+
+// FacetList fetches only the workers in the given state — never an
+// unfiltered/combined list, since a single pool can have tens of thousands
+// of stopped workers.
+func (r *WorkersResource) FacetList(workerPoolID, state string) ([]Row, error) {
+	workers, err := r.tc.GetWorkersForWorkerPool(workerPoolID, state)
 	if err != nil {
 		return nil, err
 	}
 
+	return workerRows(workers), nil
+}
+
+// FacetCounts returns worker counts by state without fetching any worker
+// rows, via worker-manager's per-pool stats endpoint.
+func (r *WorkersResource) FacetCounts(workerPoolID string) (map[string]int, error) {
+	return r.tc.GetWorkerPoolStateCounts(workerPoolID)
+}
+
+// ScopedList exists only so WorkersResource still satisfies ScopedResource
+// (needed for the EmptyScopeResource redirect when no scope is given); the
+// shell always prefers FacetList via the ServerFaceted branch.
+func (r *WorkersResource) ScopedList(workerPoolID string) ([]Row, error) {
+	return r.FacetList(workerPoolID, r.FacetOptions()[0])
+}
+
+// workerRows converts a WorkerList into the shell's generic Row shape,
+// shared by ScopedList and FacetList.
+func workerRows(workers taskcluster.WorkerList) []Row {
 	rows := make([]Row, 0, len(workers))
 	for _, worker := range workers {
 		rows = append(rows, Row{
@@ -63,7 +91,7 @@ func (r *WorkersResource) ScopedList(workerPoolID string) ([]Row, error) {
 		})
 	}
 
-	return rows, nil
+	return rows
 }
 
 func (r *WorkersResource) EmptyScopeResource() string {

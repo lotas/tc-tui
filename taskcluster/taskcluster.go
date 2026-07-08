@@ -26,7 +26,8 @@ type Taskcluster interface {
 	GetRole(roleID string) (*tcauth.GetRoleResponse, error)
 	GetWorkerPools() (WorkerPoolList, error)
 	GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error)
-	GetWorkersForWorkerPool(workerPoolID string) (WorkerList, error)
+	GetWorkersForWorkerPool(workerPoolID, state string) (WorkerList, error)
+	GetWorkerPoolStateCounts(workerPoolID string) (map[string]int, error)
 	GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error)
 }
 
@@ -154,9 +155,9 @@ func (tc *TC) GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFul
 	return tc.wm.WorkerPool(workerPoolID)
 }
 
-func (tc *TC) GetWorkersForWorkerPool(workerPoolID string) (WorkerList, error) {
+func (tc *TC) GetWorkersForWorkerPool(workerPoolID, state string) (WorkerList, error) {
 	workers, err := paginate(func(cont string) ([]tcworkermanager.WorkerFullDefinition, string, error) {
-		resp, err := tc.wm.ListWorkersForWorkerPool(workerPoolID, cont, "" /* launchConfigId */, PageSize, "" /* state */)
+		resp, err := tc.wm.ListWorkersForWorkerPool(workerPoolID, cont, "" /* launchConfigId */, PageSize, state)
 		if err != nil {
 			return nil, "", err
 		}
@@ -167,6 +168,26 @@ func (tc *TC) GetWorkersForWorkerPool(workerPoolID string) (WorkerList, error) {
 	}
 
 	return WorkerList(workers), nil
+}
+
+// GetWorkerPoolStateCounts returns worker counts by state for one pool,
+// summed across its launch configurations. It calls the lightweight
+// worker-pool stats endpoint — no individual worker rows are fetched.
+func (tc *TC) GetWorkerPoolStateCounts(workerPoolID string) (map[string]int, error) {
+	stats, err := tc.wm.WorkerPoolStats(workerPoolID)
+	if err != nil {
+		return nil, err
+	}
+
+	counts := map[string]int{"requested": 0, "running": 0, "stopping": 0, "stopped": 0}
+	for _, lc := range stats.LaunchConfigStats {
+		counts["requested"] += int(lc.RequestedCount)
+		counts["running"] += int(lc.RunningCount)
+		counts["stopping"] += int(lc.StoppingCount)
+		counts["stopped"] += int(lc.StoppedCount)
+	}
+
+	return counts, nil
 }
 
 func (tc *TC) GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error) {

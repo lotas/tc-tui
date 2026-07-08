@@ -85,6 +85,50 @@ func (s *Shell) goBack() {
 	}
 }
 
+// cycleFacet moves the current list view to the next (direction 1) or
+// previous (direction -1) facet tab, wrapping around. For a client-side
+// Faceted resource this is instant (refreshTable() re-filters s.lastRows).
+// For a ServerFaceted resource it triggers a fresh fetch, since a different
+// tab means different rows entirely.
+func (s *Shell) cycleFacet(direction int) {
+	switch {
+	case s.currentServerFaceted != nil:
+		tabs := ServerFacetTabs(s.currentServerFaceted, s.currentFacetCounts)
+		next := cycleFacetValue(tabs, s.currentFacetValue, direction)
+		if next == s.currentFacetValue {
+			return
+		}
+
+		s.currentFacetValue = next
+		s.facetByResource[s.currentListResource] = next
+		s.table.ResetSelection()
+
+		top, ok := s.stack.Top()
+		if !ok {
+			return
+		}
+
+		// Use the already-held ServerFaceted value directly (it embeds
+		// resource.Resource) rather than re-resolving via the registry — a
+		// tab switch doesn't change which resource is active, just its
+		// facet value, so there's no need to look it up again.
+		res := s.currentServerFaceted
+		s.setTitle("Loading " + res.Name() + "...")
+		s.table.SetData(s.currentColumns, nil, s.currentSort)
+		s.loadList(res, top.Scope, s.currentFacetValue, true)
+
+	case s.currentFaceted != nil:
+		rows := FilterRows(s.lastRows, s.filterQuery)
+		tabs := ClientFacetTabs(s.currentFaceted, rows)
+		next := cycleFacetValue(tabs, s.currentFacetValue, direction)
+
+		s.currentFacetValue = next
+		s.facetByResource[s.currentListResource] = next
+		s.table.ResetSelection()
+		s.refreshTable()
+	}
+}
+
 // toggleSort updates the active sort for the current list view: pressing
 // the same column again reverses direction; any other column starts fresh
 // at ascending. The result is remembered per-resource in sortByResource so
@@ -110,13 +154,63 @@ func (s *Shell) toggleSort(column int) {
 }
 
 // refreshTable recomputes the table's displayed rows from s.lastRows by
-// applying the current filter then the current sort, and re-renders. This
-// is the single place list-view rows get filtered/sorted — call it any
-// time s.lastRows, s.filterQuery, or s.currentSort changes.
+// applying the current filter, facet, then sort, and re-renders. This is
+// the single place list-view rows get filtered/sorted — call it any time
+// s.lastRows, s.filterQuery, s.currentFacetValue, or s.currentSort changes.
 func (s *Shell) refreshTable() {
 	rows := FilterRows(s.lastRows, s.filterQuery)
+	s.renderTabsBar(rows)
+
+	// For a ServerFaceted resource, s.lastRows is already exactly the
+	// selected tab's rows (server-filtered) — no client-side facet filter
+	// applies. For a Faceted resource, filter client-side.
+	if s.currentFaceted != nil {
+		rows = FilterByFacet(rows, s.currentFaceted, s.currentFacetValue)
+	}
+
 	rows = SortRows(rows, s.currentSort)
 	s.table.SetData(s.currentColumns, rows, s.currentSort)
+}
+
+// renderTabsBar recomputes and redraws the facet tab bar from rows (used
+// only by the client-side Faceted case; ServerFaceted reads
+// s.currentFacetCounts instead, ignoring rows), collapsing the bar entirely
+// when the current resource has no facets.
+func (s *Shell) renderTabsBar(rows []resource.Row) {
+	var tabs []FacetTab
+	switch {
+	case s.currentServerFaceted != nil:
+		tabs = ServerFacetTabs(s.currentServerFaceted, s.currentFacetCounts)
+	case s.currentFaceted != nil:
+		tabs = ClientFacetTabs(s.currentFaceted, rows)
+	default:
+		s.tableContainer.ResizeItem(s.tabsBar, 0, 0)
+		s.tabsBar.SetText("")
+		return
+	}
+
+	s.tableContainer.ResizeItem(s.tabsBar, 1, 0)
+
+	var b strings.Builder
+	for i, tab := range tabs {
+		if i > 0 {
+			b.WriteString("   ")
+		}
+
+		label := tab.Value
+		if label == "" {
+			label = "All"
+		}
+		text := fmt.Sprintf("%s (%d)", label, tab.Count)
+
+		if tab.Value == s.currentFacetValue {
+			b.WriteString("[yellow::b]" + text + "[-:-:-]")
+		} else {
+			b.WriteString(text)
+		}
+	}
+
+	s.tabsBar.SetText(" " + b.String())
 }
 
 func (s *Shell) renderList(res resource.Resource, scope string) {
@@ -127,25 +221,70 @@ func (s *Shell) renderList(res resource.Resource, scope string) {
 	s.currentColumns = res.Columns()
 	s.currentSort = s.sortByResource[res.Name()] // zero value (SortNone) if not yet sorted
 
+	s.currentFaceted = nil
+	s.currentServerFaceted = nil
+	s.currentFacetValue = ""
+	s.currentFacetCounts = nil
+
+	if sf, ok := res.(resource.ServerFaceted); ok {
+		s.currentServerFaceted = sf
+		s.currentFacetValue = s.restoreFacetValue(sf, res.Name())
+	} else if f, ok := res.(resource.Faceted); ok {
+		s.currentFaceted = f
+		s.currentFacetValue = s.facetByResource[res.Name()] // "" (All) if never set
+	}
+
 	s.setTitle("Loading " + res.Name() + "...")
 	s.table.SetData(s.currentColumns, nil, s.currentSort)
+	s.renderTabsBar(nil)
 	s.content.SwitchToPage(pageTable)
 	s.app.SetFocus(s.table)
 
 	s.startRefreshLoop(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope}, res.RefreshInterval())
-	s.loadList(res, scope, true)
+	s.loadList(res, scope, s.currentFacetValue, true)
 }
 
-// loadList fetches List() (or, if scope is non-empty, ScopedList(scope)) in
-// the background. isInitial distinguishes a first/navigation load (failure
-// shows a full-screen error with retry) from a background refresh tick
-// (failure shows a transient warning and keeps the last-good render).
-func (s *Shell) loadList(res resource.Resource, scope string, isInitial bool) {
+// restoreFacetValue returns the remembered facet value for name if it's
+// still a valid option for sf, otherwise sf's first (default) option.
+func (s *Shell) restoreFacetValue(sf resource.ServerFaceted, name string) string {
+	options := sf.FacetOptions()
+	if len(options) == 0 {
+		return ""
+	}
+
+	saved := s.facetByResource[name]
+	for _, opt := range options {
+		if opt == saved {
+			return saved
+		}
+	}
+
+	return options[0]
+}
+
+// loadList fetches this view's rows in the background: via
+// ServerFaceted.FacetList(scope, facetValue) if the resource implements it,
+// otherwise via ScopedList(scope) (if scope is non-empty) or List(). Passing
+// facetValue explicitly (rather than reading s.currentFacetValue from this
+// goroutine) avoids a data race with a UI-thread tab switch, and re-checking
+// it on completion discards a slow fetch that a newer tab switch has since
+// superseded. isInitial distinguishes a first/navigation load (failure shows
+// a full-screen error with retry) from a background refresh tick or tab
+// switch that hasn't (failure shows a transient warning and keeps the
+// last-good render) — tab switches themselves pass isInitial=true, since
+// they're a deliberate user action.
+func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInitial bool) {
 	go func() {
 		var rows []resource.Row
+		var counts map[string]int
 		var err error
 
-		if scope != "" {
+		if sf, ok := res.(resource.ServerFaceted); ok {
+			rows, err = sf.FacetList(scope, facetValue)
+			if err == nil {
+				counts, err = sf.FacetCounts(scope)
+			}
+		} else if scope != "" {
 			scoped, ok := res.(resource.ScopedResource)
 			if !ok {
 				err = fmt.Errorf("%s does not support a scoped list", res.Name())
@@ -160,6 +299,9 @@ func (s *Shell) loadList(res resource.Resource, scope string, isInitial bool) {
 			if !s.isTopView(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope}) {
 				return
 			}
+			if facetValue != s.currentFacetValue {
+				return // a newer tab switch has already superseded this fetch
+			}
 
 			if err != nil {
 				if isInitial {
@@ -171,6 +313,9 @@ func (s *Shell) loadList(res resource.Resource, scope string, isInitial bool) {
 			}
 
 			s.lastRows = rows
+			if counts != nil {
+				s.currentFacetCounts = counts
+			}
 			s.refreshTable()
 			s.activeContent = s.table
 			s.setTitle(res.Name())

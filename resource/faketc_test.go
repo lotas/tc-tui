@@ -18,10 +18,15 @@ type fakeTaskcluster struct {
 	workerPool     *tcworkermanager.WorkerPoolFullDefinition
 	workerPoolErr  error
 
-	workers    taskcluster.WorkerList
-	workersErr error
-	worker     *tcworkermanager.WorkerFullDefinition
-	workerErr  error
+	workers      taskcluster.WorkerList
+	workersErr   error
+	workersState string // last `state` param GetWorkersForWorkerPool was called with
+
+	stateCounts    map[string]int
+	stateCountsErr error
+
+	worker    *tcworkermanager.WorkerFullDefinition
+	workerErr error
 }
 
 func (f *fakeTaskcluster) GetVersion() taskcluster.Version { return taskcluster.Version{} }
@@ -45,8 +50,13 @@ func (f *fakeTaskcluster) GetWorkerPool(workerPoolID string) (*tcworkermanager.W
 	return f.workerPool, f.workerPoolErr
 }
 
-func (f *fakeTaskcluster) GetWorkersForWorkerPool(workerPoolID string) (taskcluster.WorkerList, error) {
+func (f *fakeTaskcluster) GetWorkersForWorkerPool(workerPoolID, state string) (taskcluster.WorkerList, error) {
+	f.workersState = state
 	return f.workers, f.workersErr
+}
+
+func (f *fakeTaskcluster) GetWorkerPoolStateCounts(workerPoolID string) (map[string]int, error) {
+	return f.stateCounts, f.stateCountsErr
 }
 
 func (f *fakeTaskcluster) GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error) {

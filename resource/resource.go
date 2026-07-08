@@ -77,3 +77,31 @@ type ScopedResource interface {
 	ScopedList(scope string) ([]Row, error)
 	EmptyScopeResource() string // resource name to show when no scope is given
 }
+
+// Faceted is implemented by resources whose list can be narrowed to a
+// secondary tabs-style filter over one column's value, filtered client-side
+// over rows the shell has already fetched — appropriate only when the full
+// unfiltered list is cheap to load (e.g. worker pools: a few hundred total).
+// The shell renders a tab bar, derives per-tab row counts, and filters to
+// the selected tab, with no extra API calls.
+type Faceted interface {
+	Resource
+	FacetColumn() int                 // index into Columns()/Row.Cells to filter on
+	FacetOptions(rows []Row) []string // ordered tab values (excluding "All"); resource
+	                                   // decides whether to hardcode or derive from rows
+}
+
+// ServerFaceted is implemented by resources whose facet tabs must be
+// filtered at the API level rather than over an already-loaded row set,
+// because the combined/unfiltered list can be too large to load or render
+// reasonably (e.g. a worker pool with hundreds of running workers but tens
+// of thousands of stopped ones). Unlike Faceted, the shell does not derive
+// or filter tabs itself — FacetOptions() is the complete, authoritative tab
+// list. A resource may include its own "show everything" value if its data
+// volume makes that safe; WorkersResource does not.
+type ServerFaceted interface {
+	Resource
+	FacetOptions() []string                          // ordered; first is the default/initial tab
+	FacetList(scope, value string) ([]Row, error)     // fetches only rows matching this tab
+	FacetCounts(scope string) (map[string]int, error) // cheap aggregate counts per tab value; no row fetch
+}

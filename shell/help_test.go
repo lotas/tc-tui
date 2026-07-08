@@ -31,6 +31,26 @@ type fakeScopedResource struct {
 func (f fakeScopedResource) ScopedList(scope string) ([]resource.Row, error) { return nil, nil }
 func (f fakeScopedResource) EmptyScopeResource() string                      { return f.emptyScope }
 
+type fakeFacetedHelpResource struct {
+	fakeResource
+}
+
+func (f fakeFacetedHelpResource) FacetColumn() int                         { return 0 }
+func (f fakeFacetedHelpResource) FacetOptions(rows []resource.Row) []string { return nil }
+
+type fakeServerFacetedHelpResource struct {
+	fakeResource
+	options []string
+}
+
+func (f fakeServerFacetedHelpResource) FacetOptions() []string { return f.options }
+func (f fakeServerFacetedHelpResource) FacetList(scope, value string) ([]resource.Row, error) {
+	return nil, nil
+}
+func (f fakeServerFacetedHelpResource) FacetCounts(scope string) (map[string]int, error) {
+	return nil, nil
+}
+
 func TestBuildHelpTextListsGlobalKeys(t *testing.T) {
 	text := buildHelpText(resource.NewRegistry())
 
@@ -84,6 +104,45 @@ func TestBuildHelpTextFlagsScopedResource(t *testing.T) {
 	text := buildHelpText(registry)
 
 	for _, want := range []string{"workers", "requires a scope", "workerpools"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("buildHelpText() missing %q\ngot:\n%s", want, text)
+		}
+	}
+}
+
+func TestBuildHelpTextExplainsTabCycling(t *testing.T) {
+	text := buildHelpText(resource.NewRegistry())
+
+	for _, want := range []string{"Tab", "Shift+Tab"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("buildHelpText() missing %q\ngot:\n%s", want, text)
+		}
+	}
+}
+
+func TestBuildHelpTextFlagsClientFacetedResource(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeFacetedHelpResource{
+		fakeResource: fakeResource{name: "workerpools", description: "pools"},
+	})
+
+	text := buildHelpText(registry)
+
+	if !strings.Contains(text, "tabs by provider") {
+		t.Errorf("buildHelpText() missing facet note for workerpools\ngot:\n%s", text)
+	}
+}
+
+func TestBuildHelpTextFlagsServerFacetedResourceWithItsOptions(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(&fakeServerFacetedHelpResource{
+		fakeResource: fakeResource{name: "workers", description: "workers"},
+		options:      []string{"running", "stopped"},
+	})
+
+	text := buildHelpText(registry)
+
+	for _, want := range []string{"tabs by state", "running", "stopped"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("buildHelpText() missing %q\ngot:\n%s", want, text)
 		}

@@ -25,7 +25,7 @@ func (s *Shell) Invalidate(view View) {
 
 	switch view.Kind {
 	case ListKind:
-		s.loadList(res, view.Scope, false)
+		s.loadList(res, view.Scope, s.currentFacetValue, false)
 	case DetailKind:
 		s.loadDetail(res, view.SelectedID, false)
 	}

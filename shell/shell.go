@@ -62,6 +62,15 @@ type Shell struct {
 	currentSort    SortState
 	sortByResource map[string]SortState
 
+	tabsBar        *tview.TextView
+	tableContainer *tview.Flex
+
+	currentFaceted       resource.Faceted
+	currentServerFaceted resource.ServerFaceted
+	currentFacetValue    string
+	currentFacetCounts   map[string]int
+	facetByResource      map[string]string
+
 	activeContent tview.Primitive
 
 	stopRefresh chan struct{}
@@ -69,10 +78,11 @@ type Shell struct {
 
 func New(registry *resource.Registry) *Shell {
 	s := &Shell{
-		app:            tview.NewApplication(),
-		registry:       registry,
-		stack:          NewViewStack(),
-		sortByResource: make(map[string]SortState),
+		app:             tview.NewApplication(),
+		registry:        registry,
+		stack:           NewViewStack(),
+		sortByResource:  make(map[string]SortState),
+		facetByResource: make(map[string]string),
 	}
 	s.init()
 
@@ -91,6 +101,11 @@ func (s *Shell) init() {
 		s.showDetail(s.currentListResource, id)
 	})
 
+	s.tabsBar = tview.NewTextView().SetDynamicColors(true)
+	s.tableContainer = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(s.tabsBar, 0, 0, false).
+		AddItem(s.table, 0, 1, true)
+
 	s.detail = NewDetailView()
 	s.detail.SetOnAction(func(target resource.NavTarget) {
 		switch target.Kind {
@@ -105,7 +120,7 @@ func (s *Shell) init() {
 	s.helpView = NewHelpView()
 
 	s.content = tview.NewPages().
-		AddPage(pageTable, s.table, true, true).
+		AddPage(pageTable, s.tableContainer, true, true).
 		AddPage(pageDetail, s.detail, true, false).
 		AddPage(pageError, s.errorView, true, false).
 		AddPage(pageHelp, s.helpView, true, false)
@@ -175,6 +190,16 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			s.toggleSort(int(event.Rune() - '1'))
 		}
 		return nil
+	case event.Key() == tcell.KeyTab:
+		if name, _ := s.content.GetFrontPage(); name == pageTable {
+			s.cycleFacet(1)
+		}
+		return nil
+	case event.Key() == tcell.KeyBacktab:
+		if name, _ := s.content.GetFrontPage(); name == pageTable {
+			s.cycleFacet(-1)
+		}
+		return nil
 	case event.Rune() == '?':
 		s.openHelp()
 		return nil
@@ -185,6 +210,12 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 
 func isQuitKey(event *tcell.EventKey) bool {
 	return event.Key() == tcell.KeyRune && event.Rune() == 'q'
+}
+
+// hasFacets reports whether the current list view has a facet tab bar —
+// either client-side (Faceted) or server-side (ServerFaceted).
+func (s *Shell) hasFacets() bool {
+	return s.currentFaceted != nil || s.currentServerFaceted != nil
 }
 
 func (s *Shell) setTitle(title string) {

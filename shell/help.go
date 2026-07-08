@@ -39,6 +39,8 @@ func buildHelpText(registry *resource.Registry) string {
 	b.WriteString("  [yellow]/[white]     filter the current list (list views only)\n")
 	b.WriteString("  [yellow]1-9[white]   sort the current list by that column, numbered left to right " +
 		"(list views only) — press the same digit again to reverse direction\n")
+	b.WriteString("  [yellow]Tab[white]/[yellow]Shift+Tab[white]  cycle the facet tab bar, for resources that have one " +
+		"(see below)\n")
 	b.WriteString("  [yellow]Esc[white]   go back / quit at the root\n")
 	b.WriteString("  [yellow]?[white]     toggle this help screen\n\n")
 
@@ -69,6 +71,15 @@ func buildHelpText(registry *resource.Registry) string {
 				"      requires a scope, e.g. `:%s <id>` — no scope redirects to `%s`\n",
 				res.Name(), scoped.EmptyScopeResource(),
 			))
+		}
+
+		switch faceted := res.(type) {
+		case resource.ServerFaceted:
+			b.WriteString(fmt.Sprintf(
+				"      tabs by state: %s\n", strings.Join(faceted.FacetOptions(), ", "),
+			))
+		case resource.Faceted:
+			b.WriteString("      tabs by provider\n")
 		}
 
 		b.WriteString("\n")

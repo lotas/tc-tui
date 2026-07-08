@@ -52,6 +52,90 @@ func TestWorkersResourceScopedListError(t *testing.T) {
 	}
 }
 
+func TestWorkersResourceFacetOptions(t *testing.T) {
+	res := NewWorkersResource(&fakeTaskcluster{})
+
+	got := res.FacetOptions()
+	want := []string{"running", "requested", "stopping", "stopped"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
+	}
+}
+
+func TestWorkersResourceFacetListPassesStateThrough(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workers: taskcluster.WorkerList{
+			{WorkerPoolID: "gcp/pool-a", WorkerGroup: "us-west1", WorkerID: "i-1234", State: "stopped", Capacity: 1},
+		},
+	}
+	res := NewWorkersResource(fake)
+
+	rows, err := res.FacetList("gcp/pool-a", "stopped")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.workersState != "stopped" {
+		t.Fatalf("expected state %q passed to the API, got %q", "stopped", fake.workersState)
+	}
+	if len(rows) != 1 || rows[0].Cells[0] != "stopped" {
+		t.Fatalf("unexpected rows: %+v", rows)
+	}
+}
+
+func TestWorkersResourceFacetListError(t *testing.T) {
+	wantErr := errors.New("boom")
+	fake := &fakeTaskcluster{workersErr: wantErr}
+	res := NewWorkersResource(fake)
+
+	_, err := res.FacetList("gcp/pool-a", "running")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+}
+
+func TestWorkersResourceFacetCounts(t *testing.T) {
+	fake := &fakeTaskcluster{
+		stateCounts: map[string]int{"running": 12, "stopped": 14302, "stopping": 1, "requested": 0},
+	}
+	res := NewWorkersResource(fake)
+
+	counts, err := res.FacetCounts("gcp/pool-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if counts["running"] != 12 || counts["stopped"] != 14302 {
+		t.Fatalf("unexpected counts: %+v", counts)
+	}
+}
+
+func TestWorkersResourceFacetCountsError(t *testing.T) {
+	wantErr := errors.New("boom")
+	fake := &fakeTaskcluster{stateCountsErr: wantErr}
+	res := NewWorkersResource(fake)
+
+	_, err := res.FacetCounts("gcp/pool-a")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+}
+
+func TestWorkersResourceScopedListDelegatesToDefaultFacet(t *testing.T) {
+	fake := &fakeTaskcluster{}
+	res := NewWorkersResource(fake)
+
+	if _, err := res.ScopedList("gcp/pool-a"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.workersState != "running" {
+		t.Fatalf("expected ScopedList to default to the first facet option %q, got %q", "running", fake.workersState)
+	}
+}
+
 func TestWorkersResourceListReturnsScopeRequiredError(t *testing.T) {
 	res := NewWorkersResource(&fakeTaskcluster{})
 

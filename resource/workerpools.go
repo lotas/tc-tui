@@ -2,6 +2,7 @@ package resource
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
@@ -28,6 +29,27 @@ func (r *WorkerPoolsResource) Columns() []Column {
 		{Title: "CAPACITY", Width: 16},
 		{Title: "REQUESTED", Width: 16},
 	}
+}
+
+// FacetColumn identifies the PROVIDER column (see Columns()).
+func (r *WorkerPoolsResource) FacetColumn() int { return 1 }
+
+// FacetOptions derives the distinct providers actually present in the
+// already-loaded pool list — no listProviders call, since the full pool
+// list (including provider) is already fetched for the table.
+func (r *WorkerPoolsResource) FacetOptions(rows []Row) []string {
+	seen := map[string]bool{}
+	var options []string
+	for _, row := range rows {
+		p := row.Cells[r.FacetColumn()]
+		if !seen[p] {
+			seen[p] = true
+			options = append(options, p)
+		}
+	}
+
+	sort.Strings(options)
+	return options
 }
 
 func (r *WorkerPoolsResource) List() ([]Row, error) {

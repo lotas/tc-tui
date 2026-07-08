@@ -23,6 +23,9 @@ func (s *Shell) initFooter() {
 
 func (s *Shell) renderFooterHints() {
 	hint := " [yellow]q[white] quit   [yellow]:[white] command   [yellow]/[white] filter   [yellow]Esc[white] back/quit   [yellow]?[white] help"
+	if s.hasFacets() {
+		hint += "   [yellow]Tab[white]/[yellow]Shift+Tab[white] switch state"
+	}
 	for _, action := range s.currentDetailActions {
 		hint += fmt.Sprintf("   [yellow]<%c>[white] %s", action.Key, action.Label)
 	}
