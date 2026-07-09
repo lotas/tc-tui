@@ -145,6 +145,29 @@ func TestRenderListFallsBackToDefaultForStaleRememberedValue(t *testing.T) {
 	}
 }
 
+func TestRenderListRestoresRememberedFilterQuery(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.filterByResource["workerpools"] = "proj-task"
+	res := fakeResource{name: "workerpools"}
+
+	s.renderList(res, "")
+
+	if s.filterQuery != "proj-task" {
+		t.Fatalf("expected remembered filter query %q, got %q", "proj-task", s.filterQuery)
+	}
+}
+
+func TestRenderListDefaultsToEmptyFilterQueryWhenNeverSet(t *testing.T) {
+	s := New(resource.NewRegistry())
+	res := fakeResource{name: "workerpools"}
+
+	s.renderList(res, "")
+
+	if s.filterQuery != "" {
+		t.Fatalf("expected empty filter query, got %q", s.filterQuery)
+	}
+}
+
 func TestRefreshTableSkipsClientFilterForServerFaceted(t *testing.T) {
 	s := New(resource.NewRegistry())
 	s.currentListResource = "workers"
@@ -432,5 +455,58 @@ func TestSwitchResourceDirectLookupWithoutIDOpensPrompt(t *testing.T) {
 	}
 	if s.pendingLookup == nil || s.pendingLookup.Name() != "task" {
 		t.Fatalf("expected pendingLookup set to the task resource, got %+v", s.pendingLookup)
+	}
+}
+
+func TestRenderRestoredTopFallsBackToRootWhenStackIsEmpty(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: "workerpools"})
+	s := New(registry)
+	s.restoreFallback = "workerpools"
+
+	s.renderRestoredTop()
+
+	if s.restoring {
+		t.Fatalf("expected restoring to be false once falling back to root")
+	}
+	top, ok := s.stack.Top()
+	if !ok || top.ResourceName != "workerpools" || top.Kind != ListKind {
+		t.Fatalf("expected root view on top, got %+v (ok=%v)", top, ok)
+	}
+}
+
+func TestRenderRestoredTopDropsUnresolvableEntriesThenFallsBackToRoot(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: "workerpools"})
+	s := New(registry)
+	s.restoreFallback = "workerpools"
+	s.stack.Push(View{ResourceName: "long-gone-resource", Kind: ListKind})
+
+	s.renderRestoredTop()
+
+	if s.restoring {
+		t.Fatalf("expected restoring to be false once falling back to root")
+	}
+	top, ok := s.stack.Top()
+	if !ok || top.ResourceName != "workerpools" || top.Kind != ListKind {
+		t.Fatalf("expected root view on top after dropping the unresolvable entry, got %+v (ok=%v)", top, ok)
+	}
+}
+
+func TestRenderRestoredTopRendersResolvableTopView(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: "workerpools"})
+	s := New(registry)
+	s.restoreFallback = "workerpools"
+	s.stack.Push(View{ResourceName: "workerpools", Kind: DetailKind, SelectedID: "abc"})
+
+	s.renderRestoredTop()
+
+	if !s.restoring {
+		t.Fatalf("expected restoring to be true while the initial fetch is still pending")
+	}
+	top, ok := s.stack.Top()
+	if !ok || top.ResourceName != "workerpools" || top.Kind != DetailKind || top.SelectedID != "abc" {
+		t.Fatalf("expected the restored detail view to remain on top, got %+v (ok=%v)", top, ok)
 	}
 }

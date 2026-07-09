@@ -59,6 +59,7 @@ type Shell struct {
 	currentColumns       []resource.Column
 	lastRows             []resource.Row
 	filterQuery          string
+	filterByResource     map[string]string
 	currentDetailActions []resource.DetailAction
 
 	currentSort    SortState
@@ -79,16 +80,25 @@ type Shell struct {
 	stopRefresh chan struct{}
 
 	cache *listCache
+
+	// restoring and restoreFallback support Start's initial restore-from-state
+	// render: while restoring is true, an initial-load failure pops the
+	// restored stack and retries the next view down instead of showing the
+	// error screen; restoreFallback is the resource to fall back to once the
+	// stack empties out.
+	restoring       bool
+	restoreFallback string
 }
 
 func New(registry *resource.Registry) *Shell {
 	s := &Shell{
-		app:             tview.NewApplication(),
-		registry:        registry,
-		stack:           NewViewStack(),
-		sortByResource:  make(map[string]SortState),
-		facetByResource: make(map[string]string),
-		cache:           newListCache(),
+		app:              tview.NewApplication(),
+		registry:         registry,
+		stack:            NewViewStack(),
+		sortByResource:   make(map[string]SortState),
+		facetByResource:  make(map[string]string),
+		filterByResource: make(map[string]string),
+		cache:            newListCache(),
 	}
 	s.init()
 
@@ -252,10 +262,12 @@ func (s *Shell) SetInfo(root, version, clientID string, authenticated bool) {
 	))
 }
 
-// Start pushes the given resource as the root view and runs the tview event
+// Start renders the app's initial view — the top of a stack restored via
+// RestoreState, if one was, otherwise rootResource — and runs the tview event
 // loop. It blocks until Stop() is called.
 func (s *Shell) Start(rootResource string) error {
-	s.switchResource(rootResource, "")
+	s.restoreFallback = rootResource
+	s.renderRestoredTop()
 	return s.app.Run()
 }
 

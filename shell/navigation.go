@@ -76,6 +76,38 @@ func (s *Shell) pushScopedList(resourceName, scope string) {
 	s.renderList(res, scope)
 }
 
+// renderRestoredTop renders the current stack's top view — called once from
+// Start with a stack populated by RestoreState (if any). While s.restoring is
+// true, a resolve/fetch failure for that view pops it and retries the next
+// one down instead of showing the error screen (set in loadList/loadDetail's
+// initial-failure branch), so a stale restored view (e.g. an entity deleted
+// since the last session) falls back through the breadcrumb trail silently.
+// Once the stack empties out, it falls back to s.restoreFallback exactly as a
+// fresh launch would.
+func (s *Shell) renderRestoredTop() {
+	top, ok := s.stack.Top()
+	if !ok {
+		s.restoring = false
+		s.switchResource(s.restoreFallback, "")
+		return
+	}
+
+	res, ok := s.registry.Resolve(top.ResourceName)
+	if !ok {
+		s.stack.Pop()
+		s.renderRestoredTop()
+		return
+	}
+
+	s.restoring = true
+	switch top.Kind {
+	case ListKind:
+		s.renderList(res, top.Scope)
+	case DetailKind:
+		s.renderDetail(res, top.SelectedID)
+	}
+}
+
 // goBack pops the top view and re-renders the new top, or quits if the
 // stack is now empty.
 func (s *Shell) goBack() {
@@ -246,7 +278,7 @@ func (s *Shell) renderTabsBar(rows []resource.Row) {
 func (s *Shell) renderList(res resource.Resource, scope string) {
 	s.currentDetailActions = nil
 	s.closeFooterInput()
-	s.filterQuery = ""
+	s.filterQuery = s.filterByResource[res.Name()] // "" if never set
 	s.currentListResource = res.Name()
 	s.currentColumns = res.Columns()
 	s.currentSort = s.sortByResource[res.Name()] // zero value (SortNone) if not yet sorted
@@ -366,6 +398,12 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 			}
 
 			if err != nil {
+				if s.restoring {
+					s.restoring = false
+					s.stack.Pop()
+					s.renderRestoredTop()
+					return
+				}
 				if isInitial {
 					s.showError(res.Name(), err, func() { s.renderList(res, scope) })
 				} else {
@@ -374,6 +412,7 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 				return
 			}
 
+			s.restoring = false
 			s.cache.set(key, cacheEntry{rows: rows, counts: counts, fetchedAt: time.Now()})
 			s.applyListResult(res, rows, counts)
 		})
@@ -404,6 +443,12 @@ func (s *Shell) loadDetail(res resource.Resource, id string, isInitial bool) {
 			}
 
 			if err != nil {
+				if s.restoring {
+					s.restoring = false
+					s.stack.Pop()
+					s.renderRestoredTop()
+					return
+				}
 				if isInitial {
 					s.showError(fmt.Sprintf("%s %s", res.Name(), id), err, func() { s.renderDetail(res, id) })
 				} else {
@@ -412,6 +457,7 @@ func (s *Shell) loadDetail(res resource.Resource, id string, isInitial bool) {
 				return
 			}
 
+			s.restoring = false
 			s.detail.SetData(detail)
 			s.currentDetailActions = detail.Actions
 			s.activeContent = s.detail

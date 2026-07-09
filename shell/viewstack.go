@@ -55,6 +55,11 @@ func (s *ViewStack) Len() int {
 	return len(s.views)
 }
 
+// Views returns a copy of the full stack, bottom-first.
+func (s *ViewStack) Views() []View {
+	return append([]View(nil), s.views...)
+}
+
 // ResetTo replaces the entire stack with a single root view. Used when the
 // `:` command bar switches resource type — it doesn't nest under the
 // current view.

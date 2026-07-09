@@ -170,3 +170,36 @@ func TestHandleFooterInputDonePromptEscapeCancels(t *testing.T) {
 		t.Fatalf("expected pendingLookup cleared, got %+v", s.pendingLookup)
 	}
 }
+
+func TestHandleFooterInputDoneFilterEnterPersistsPerResource(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentListResource = "workerpools"
+	s.footerMode = footerFilter
+	s.footerInput.SetText("proj-task")
+
+	s.handleFooterInputDone(tcell.KeyEnter)
+
+	if s.filterQuery != "proj-task" {
+		t.Fatalf("expected filterQuery %q, got %q", "proj-task", s.filterQuery)
+	}
+	if got := s.filterByResource["workerpools"]; got != "proj-task" {
+		t.Fatalf("expected filterByResource[workerpools] = %q, got %q", "proj-task", got)
+	}
+}
+
+func TestHandleFooterInputDoneFilterEscapeClearsPersistedValue(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentListResource = "workerpools"
+	s.filterByResource["workerpools"] = "proj-task"
+	s.filterQuery = "proj-task"
+	s.footerMode = footerFilter
+
+	s.handleFooterInputDone(tcell.KeyEscape)
+
+	if s.filterQuery != "" {
+		t.Fatalf("expected filterQuery cleared, got %q", s.filterQuery)
+	}
+	if got := s.filterByResource["workerpools"]; got != "" {
+		t.Fatalf("expected filterByResource[workerpools] cleared, got %q", got)
+	}
+}

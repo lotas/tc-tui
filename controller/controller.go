@@ -3,6 +3,7 @@ package controller
 import (
 	"github.com/taskcluster/tc-tui/resource"
 	"github.com/taskcluster/tc-tui/shell"
+	"github.com/taskcluster/tc-tui/state"
 	"github.com/taskcluster/tc-tui/taskcluster"
 )
 
@@ -15,6 +16,11 @@ type TcController interface {
 type Controller struct {
 	tc    taskcluster.Taskcluster
 	shell *shell.Shell
+
+	// statePath is "" if persisting navigation state is unavailable (e.g. the
+	// OS user cache directory can't be resolved), in which case load/save are
+	// both skipped and the app behaves as if this feature didn't exist.
+	statePath string
 }
 
 func NewController() TcController {
@@ -30,9 +36,17 @@ func NewController() TcController {
 	registry.Register(resource.NewPendingTasksResource(tc))
 	registry.Register(resource.NewClaimedTasksResource(tc))
 
+	sh := shell.New(registry)
+
+	statePath, err := state.Path(tc.GetRoot())
+	if err == nil {
+		sh.RestoreState(state.Load(statePath))
+	}
+
 	return &Controller{
-		tc:    tc,
-		shell: shell.New(registry),
+		tc:        tc,
+		shell:     sh,
+		statePath: statePath,
 	}
 }
 
@@ -48,5 +62,11 @@ func (c *Controller) StartUI() error {
 		)
 	}()
 
-	return c.shell.Start(rootResource)
+	err := c.shell.Start(rootResource)
+
+	if c.statePath != "" {
+		_ = state.Save(c.statePath, c.shell.ExportState())
+	}
+
+	return err
 }

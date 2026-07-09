@@ -170,6 +170,7 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 			}
 		case footerFilter:
 			s.filterQuery = s.footerInput.GetText()
+			s.filterByResource[s.currentListResource] = s.filterQuery
 			s.closeFooterInput()
 		case footerPrompt:
 			id := strings.TrimSpace(s.footerInput.GetText())
@@ -184,6 +185,7 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 	case tcell.KeyEscape:
 		if s.footerMode == footerFilter {
 			s.filterQuery = ""
+			s.filterByResource[s.currentListResource] = ""
 			s.refreshTable()
 		}
 		s.pendingLookup = nil
