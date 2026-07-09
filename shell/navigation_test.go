@@ -400,3 +400,37 @@ func TestGlobalInputCaptureDigitBeyondColumnCountIsNoOp(t *testing.T) {
 		t.Fatalf("expected out-of-range digit to be a no-op, got %+v", s.currentSort)
 	}
 }
+
+func TestSwitchResourceDirectLookupWithIDGoesStraightToDetail(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeDirectLookupResource{
+		fakeResource: fakeResource{name: "task"},
+		label:        "task id",
+	})
+	s := New(registry)
+
+	s.switchResource("task", "task-1")
+
+	top, ok := s.stack.Top()
+	if !ok || top.Kind != DetailKind || top.SelectedID != "task-1" || top.ResourceName != "task" {
+		t.Fatalf("unexpected top view: %+v (ok=%v)", top, ok)
+	}
+}
+
+func TestSwitchResourceDirectLookupWithoutIDOpensPrompt(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeDirectLookupResource{
+		fakeResource: fakeResource{name: "task"},
+		label:        "task id",
+	})
+	s := New(registry)
+
+	s.switchResource("task", "")
+
+	if s.footerMode != footerPrompt {
+		t.Fatalf("expected footerMode footerPrompt, got %v", s.footerMode)
+	}
+	if s.pendingLookup == nil || s.pendingLookup.Name() != "task" {
+		t.Fatalf("expected pendingLookup set to the task resource, got %+v", s.pendingLookup)
+	}
+}

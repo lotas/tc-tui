@@ -2,6 +2,7 @@ package resource
 
 import (
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcworkermanager"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
@@ -27,6 +28,24 @@ type fakeTaskcluster struct {
 
 	worker    *tcworkermanager.WorkerFullDefinition
 	workerErr error
+
+	task    *tcqueue.TaskDefinitionResponse
+	taskErr error
+
+	taskStatus    *tcqueue.TaskStatusStructure
+	taskStatusErr error
+
+	taskGroup    *tcqueue.TaskGroupDefinitionResponse
+	taskGroupErr error
+
+	taskGroupTasks    taskcluster.TaskGroupTaskList
+	taskGroupTasksErr error
+
+	pendingTasks    taskcluster.PendingTaskList
+	pendingTasksErr error
+
+	claimedTasks    taskcluster.ClaimedTaskList
+	claimedTasksErr error
 }
 
 func (f *fakeTaskcluster) GetVersion() taskcluster.Version { return taskcluster.Version{} }
@@ -61,4 +80,28 @@ func (f *fakeTaskcluster) GetWorkerPoolStateCounts(workerPoolID string) (map[str
 
 func (f *fakeTaskcluster) GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error) {
 	return f.worker, f.workerErr
+}
+
+func (f *fakeTaskcluster) GetTask(taskID string) (*tcqueue.TaskDefinitionResponse, error) {
+	return f.task, f.taskErr
+}
+
+func (f *fakeTaskcluster) GetTaskStatus(taskID string) (*tcqueue.TaskStatusStructure, error) {
+	return f.taskStatus, f.taskStatusErr
+}
+
+func (f *fakeTaskcluster) GetTaskGroup(taskGroupID string) (*tcqueue.TaskGroupDefinitionResponse, error) {
+	return f.taskGroup, f.taskGroupErr
+}
+
+func (f *fakeTaskcluster) GetTaskGroupTasks(taskGroupID string) (taskcluster.TaskGroupTaskList, error) {
+	return f.taskGroupTasks, f.taskGroupTasksErr
+}
+
+func (f *fakeTaskcluster) GetPendingTasks(taskQueueID string) (taskcluster.PendingTaskList, error) {
+	return f.pendingTasks, f.pendingTasksErr
+}
+
+func (f *fakeTaskcluster) GetClaimedTasks(taskQueueID string) (taskcluster.ClaimedTaskList, error) {
+	return f.claimedTasks, f.claimedTasksErr
 }

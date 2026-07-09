@@ -25,6 +25,7 @@ const (
 	footerHints footerMode = iota
 	footerCommand
 	footerFilter
+	footerPrompt
 )
 
 // Shell is the generic navigation engine: registry, view stack, table/detail
@@ -48,10 +49,11 @@ type Shell struct {
 	helpOpen    bool
 	preHelpPage string
 
-	footer      *tview.Pages
-	footerHint  *tview.TextView
-	footerInput *tview.InputField
-	footerMode  footerMode
+	footer        *tview.Pages
+	footerHint    *tview.TextView
+	footerInput   *tview.InputField
+	footerMode    footerMode
+	pendingLookup resource.Resource // set while footerMode == footerPrompt; the resource awaiting an id
 
 	currentListResource  string
 	currentColumns       []resource.Column

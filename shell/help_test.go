@@ -31,6 +31,13 @@ type fakeScopedResource struct {
 func (f fakeScopedResource) ScopedList(scope string) ([]resource.Row, error) { return nil, nil }
 func (f fakeScopedResource) EmptyScopeResource() string                      { return f.emptyScope }
 
+type fakeDirectLookupResource struct {
+	fakeResource
+	label string
+}
+
+func (f fakeDirectLookupResource) IDPromptLabel() string { return f.label }
+
 type fakeFacetedHelpResource struct {
 	fakeResource
 }
@@ -107,6 +114,28 @@ func TestBuildHelpTextFlagsScopedResource(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("buildHelpText() missing %q\ngot:\n%s", want, text)
 		}
+	}
+}
+
+func TestBuildHelpTextFlagsDirectLookupResource(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeDirectLookupResource{
+		fakeResource: fakeResource{
+			name:        "task",
+			description: "A single task, looked up directly by task ID",
+		},
+		label: "task id",
+	})
+
+	text := buildHelpText(registry)
+
+	for _, want := range []string{"task", "requires an id", "opens a prompt", "task id"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("buildHelpText() missing %q\ngot:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "columns:") {
+		t.Errorf("buildHelpText() should omit columns for a DirectLookup resource\ngot:\n%s", text)
 	}
 }
 

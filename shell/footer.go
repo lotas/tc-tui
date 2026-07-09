@@ -6,6 +6,8 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
+	"github.com/taskcluster/tc-tui/resource"
 )
 
 func (s *Shell) initFooter() {
@@ -47,6 +49,17 @@ func (s *Shell) openFilter() {
 	s.app.SetFocus(s.footerInput)
 }
 
+// openIDPrompt switches the footer to an inline id-entry field for a
+// DirectLookup resource reached with no id (e.g. bare `:task`), rather than
+// erroring or redirecting — there's no browsable list to redirect to.
+func (s *Shell) openIDPrompt(res resource.DirectLookup) {
+	s.footerMode = footerPrompt
+	s.pendingLookup = res
+	s.footerInput.SetLabel(fmt.Sprintf("[yellow]%s:[white] ", res.IDPromptLabel())).SetText("")
+	s.footer.SwitchToPage(pageFooterInput)
+	s.app.SetFocus(s.footerInput)
+}
+
 func (s *Shell) closeFooterInput() {
 	s.footerMode = footerHints
 	s.footer.SwitchToPage(pageFooterHints)
@@ -78,12 +91,22 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 		case footerFilter:
 			s.filterQuery = s.footerInput.GetText()
 			s.closeFooterInput()
+		case footerPrompt:
+			id := strings.TrimSpace(s.footerInput.GetText())
+			if id == "" {
+				return // keep the prompt open; nothing to look up yet
+			}
+			res := s.pendingLookup
+			s.pendingLookup = nil
+			s.closeFooterInput()
+			s.switchToDetail(res, id)
 		}
 	case tcell.KeyEscape:
 		if s.footerMode == footerFilter {
 			s.filterQuery = ""
 			s.refreshTable()
 		}
+		s.pendingLookup = nil
 		s.closeFooterInput()
 	}
 }

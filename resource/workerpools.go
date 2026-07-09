@@ -114,6 +114,24 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 					Kind:         NavScopedList,
 				},
 			},
+			{
+				Key:   'p',
+				Label: "pending",
+				Target: NavTarget{
+					ResourceName: "pending",
+					ID:           pool.WorkerPoolID,
+					Kind:         NavScopedList,
+				},
+			},
+			{
+				Key:   'c',
+				Label: "claimed",
+				Target: NavTarget{
+					ResourceName: "claimed",
+					ID:           pool.WorkerPoolID,
+					Kind:         NavScopedList,
+				},
+			},
 		},
 	}, nil
 }

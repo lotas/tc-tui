@@ -76,13 +76,20 @@ func TestWorkerPoolsResourceDescribe(t *testing.T) {
 	if detail.Title != "Worker Pool :: proj/pool-a" {
 		t.Fatalf("unexpected title: %s", detail.Title)
 	}
-	if len(detail.Actions) != 1 {
-		t.Fatalf("expected 1 action, got %d", len(detail.Actions))
+	if len(detail.Actions) != 3 {
+		t.Fatalf("expected 3 actions, got %d", len(detail.Actions))
 	}
-	action := detail.Actions[0]
-	if action.Key != 'w' || action.Target.ResourceName != "workers" ||
-		action.Target.ID != "proj/pool-a" || action.Target.Kind != NavScopedList {
-		t.Fatalf("unexpected action: %+v", action)
+	if a := detail.Actions[0]; a.Key != 'w' || a.Target.ResourceName != "workers" ||
+		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action[0]: %+v", a)
+	}
+	if a := detail.Actions[1]; a.Key != 'p' || a.Target.ResourceName != "pending" ||
+		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action[1]: %+v", a)
+	}
+	if a := detail.Actions[2]; a.Key != 'c' || a.Target.ResourceName != "claimed" ||
+		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action[2]: %+v", a)
 	}
 	if !strings.Contains(detail.Body, "a pool") || !strings.Contains(detail.Body, "owner@example.com") {
 		t.Fatalf("unexpected body: %s", detail.Body)

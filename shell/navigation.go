@@ -22,6 +22,15 @@ func (s *Shell) switchResource(nameOrAlias, scope string) {
 		return
 	}
 
+	if direct, isDirect := res.(resource.DirectLookup); isDirect {
+		if scope == "" {
+			s.openIDPrompt(direct)
+			return
+		}
+		s.switchToDetail(res, scope)
+		return
+	}
+
 	if scoped, isScoped := res.(resource.ScopedResource); isScoped && scope == "" {
 		s.switchResource(scoped.EmptyScopeResource(), "")
 		return
@@ -29,6 +38,15 @@ func (s *Shell) switchResource(nameOrAlias, scope string) {
 
 	s.stack.ResetTo(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope})
 	s.renderList(res, scope)
+}
+
+// switchToDetail resets the navigation stack to a Detail view for res/id —
+// the DirectLookup counterpart of switchResource's List-view reset. Used by
+// a `:name <id>` command and by the id-prompt handleFooterInputDone opens
+// when <id> is omitted.
+func (s *Shell) switchToDetail(res resource.Resource, id string) {
+	s.stack.ResetTo(View{ResourceName: res.Name(), Kind: DetailKind, SelectedID: id})
+	s.renderDetail(res, id)
 }
 
 // showDetail pushes a Detail view for id onto the stack.

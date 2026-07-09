@@ -14,8 +14,10 @@ require (
 	github.com/fatih/camelcase v1.0.0 // indirect
 	github.com/gdamore/encoding v1.0.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/johncgriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-runewidth v0.0.23 // indirect
+	github.com/orcaman/writerseeker v0.0.0-20200621085525-1d3f536ff85e // indirect
 	github.com/pborman/uuid v1.2.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/taskcluster/httpbackoff/v3 v3.1.0 // indirect

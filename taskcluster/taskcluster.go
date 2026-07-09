@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcworkermanager"
 )
 
@@ -14,6 +15,9 @@ const PageSize = "150"
 type RolesList []tcauth.GetRoleResponse
 type WorkerPoolList []tcworkermanager.WorkerPoolFullDefinition
 type WorkerList []tcworkermanager.WorkerFullDefinition
+type TaskGroupTaskList []tcqueue.TaskDefinitionAndStatus // ListTaskGroup's members
+type PendingTaskList []tcqueue.Var3                      // ListPendingTasks' members
+type ClaimedTaskList []tcqueue.Var4                      // ListClaimedTasks' members
 
 type Taskcluster interface {
 	GetVersion() Version
@@ -29,11 +33,19 @@ type Taskcluster interface {
 	GetWorkersForWorkerPool(workerPoolID, state string) (WorkerList, error)
 	GetWorkerPoolStateCounts(workerPoolID string) (map[string]int, error)
 	GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error)
+
+	GetTask(taskID string) (*tcqueue.TaskDefinitionResponse, error)
+	GetTaskStatus(taskID string) (*tcqueue.TaskStatusStructure, error)
+	GetTaskGroup(taskGroupID string) (*tcqueue.TaskGroupDefinitionResponse, error)
+	GetTaskGroupTasks(taskGroupID string) (TaskGroupTaskList, error)
+	GetPendingTasks(taskQueueID string) (PendingTaskList, error)
+	GetClaimedTasks(taskQueueID string) (ClaimedTaskList, error)
 }
 
 type TC struct {
-	auth *tcauth.Auth
-	wm   *tcworkermanager.WorkerManager
+	auth  *tcauth.Auth
+	wm    *tcworkermanager.WorkerManager
+	queue *tcqueue.Queue
 
 	tcRoot string
 }
@@ -47,8 +59,9 @@ type Version struct {
 
 func NewTaskcluster() Taskcluster {
 	tc := &TC{
-		auth: tcauth.NewFromEnv(),
-		wm:   tcworkermanager.NewFromEnv(),
+		auth:  tcauth.NewFromEnv(),
+		wm:    tcworkermanager.NewFromEnv(),
+		queue: tcqueue.NewFromEnv(),
 	}
 
 	tc.tcRoot = tc.auth.RootURL
@@ -192,6 +205,67 @@ func (tc *TC) GetWorkerPoolStateCounts(workerPoolID string) (map[string]int, err
 
 func (tc *TC) GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error) {
 	return tc.wm.Worker(workerPoolID, workerGroup, workerID)
+}
+
+func (tc *TC) GetTask(taskID string) (*tcqueue.TaskDefinitionResponse, error) {
+	return tc.queue.Task(taskID)
+}
+
+func (tc *TC) GetTaskStatus(taskID string) (*tcqueue.TaskStatusStructure, error) {
+	resp, err := tc.queue.Status(taskID)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.Status, nil
+}
+
+func (tc *TC) GetTaskGroup(taskGroupID string) (*tcqueue.TaskGroupDefinitionResponse, error) {
+	return tc.queue.GetTaskGroup(taskGroupID)
+}
+
+func (tc *TC) GetTaskGroupTasks(taskGroupID string) (TaskGroupTaskList, error) {
+	tasks, err := paginate(func(cont string) ([]tcqueue.TaskDefinitionAndStatus, string, error) {
+		resp, err := tc.queue.ListTaskGroup(taskGroupID, cont, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Tasks, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return TaskGroupTaskList(tasks), nil
+}
+
+func (tc *TC) GetPendingTasks(taskQueueID string) (PendingTaskList, error) {
+	tasks, err := paginate(func(cont string) ([]tcqueue.Var3, string, error) {
+		resp, err := tc.queue.ListPendingTasks(taskQueueID, cont, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Tasks, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return PendingTaskList(tasks), nil
+}
+
+func (tc *TC) GetClaimedTasks(taskQueueID string) (ClaimedTaskList, error) {
+	tasks, err := paginate(func(cont string) ([]tcqueue.Var4, string, error) {
+		resp, err := tc.queue.ListClaimedTasks(taskQueueID, cont, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Tasks, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return ClaimedTaskList(tasks), nil
 }
 
 func (tc *TC) GetRoot() string {

@@ -78,6 +78,23 @@ type ScopedResource interface {
 	EmptyScopeResource() string // resource name to show when no scope is given
 }
 
+// DirectLookup is implemented by resources with no meaningful list at all —
+// every entity is addressed directly by its own ID (e.g. a single task or a
+// task group; Taskcluster's Queue API has no "list all tasks"/"list all task
+// groups" endpoint). The shell treats a `:name <id>` command's argument as
+// the ID to Describe immediately, skipping the List view entirely. With no
+// id given, the shell opens an inline prompt for one instead of attempting a
+// fetch.
+//
+// IDPromptLabel is DirectLookup's only method beyond Resource — required so
+// the interface isn't structurally identical to Resource (which would make
+// every Resource satisfy it). It doubles as that prompt's label, e.g. "task
+// id".
+type DirectLookup interface {
+	Resource
+	IDPromptLabel() string
+}
+
 // Faceted is implemented by resources whose list can be narrowed to a
 // secondary tabs-style filter over one column's value, filtered client-side
 // over rows the shell has already fetched — appropriate only when the full

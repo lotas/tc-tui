@@ -56,6 +56,15 @@ func buildHelpText(registry *resource.Registry) string {
 			aliases = strings.Join(res.Aliases(), ", ")
 		}
 
+		if direct, isDirect := res.(resource.DirectLookup); isDirect {
+			b.WriteString(fmt.Sprintf(
+				"  [yellow]%s[white] (aliases: %s)\n      %s\n"+
+					"      requires an id, e.g. `:%s <id>` — no id opens a prompt asking for a %s\n\n",
+				res.Name(), aliases, res.Description(), direct.Name(), direct.IDPromptLabel(),
+			))
+			continue
+		}
+
 		columns := make([]string, len(res.Columns()))
 		for i, col := range res.Columns() {
 			columns[i] = col.Title
