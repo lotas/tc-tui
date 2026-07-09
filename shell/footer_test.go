@@ -44,26 +44,76 @@ func TestSplitCommandWhitespaceOnlyInput(t *testing.T) {
 	}
 }
 
-func TestRenderFooterHintsShowsTabHintWhenFaceted(t *testing.T) {
+func TestRenderHeaderHintsShowsTabHintWhenFaceted(t *testing.T) {
 	s := New(resource.NewRegistry())
 	s.currentFaceted = fakeFacetedColumn{column: 0, options: []string{"aws"}}
 
-	s.renderFooterHints()
+	s.renderHeaderHints()
 
-	text := s.footerHint.GetText(false)
+	text := s.headerHint.GetText(false)
 	if !strings.Contains(text, "Tab") || !strings.Contains(text, "Shift+Tab") {
 		t.Fatalf("expected Tab/Shift+Tab hint, got %q", text)
 	}
 }
 
-func TestRenderFooterHintsOmitsTabHintWhenNotFaceted(t *testing.T) {
+func TestRenderHeaderHintsOmitsTabHintWhenNotFaceted(t *testing.T) {
 	s := New(resource.NewRegistry())
 
-	s.renderFooterHints()
+	s.renderHeaderHints()
 
-	text := s.footerHint.GetText(false)
+	text := s.headerHint.GetText(false)
 	if strings.Contains(text, "Shift+Tab") {
 		t.Fatalf("expected no Tab hint for a non-faceted resource, got %q", text)
+	}
+}
+
+func TestRenderBreadcrumbsEmptyStack(t *testing.T) {
+	s := New(resource.NewRegistry())
+
+	s.renderBreadcrumbs()
+
+	text := strings.TrimSpace(s.footerBreadcrumb.GetText(false))
+	if text != "" {
+		t.Fatalf("expected empty breadcrumb for empty stack, got %q", text)
+	}
+}
+
+func TestRenderBreadcrumbsListView(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.stack.Push(View{ResourceName: "workerpools", Kind: ListKind})
+
+	s.renderBreadcrumbs()
+
+	text := strings.TrimSpace(s.footerBreadcrumb.GetText(false))
+	if text != "workerpools" {
+		t.Fatalf("unexpected breadcrumb: %q", text)
+	}
+}
+
+func TestRenderBreadcrumbsScopedListView(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.stack.Push(View{ResourceName: "workers", Kind: ListKind, Scope: "gecko-3/b-linux"})
+
+	s.renderBreadcrumbs()
+
+	text := strings.TrimSpace(s.footerBreadcrumb.GetText(false))
+	if text != "workers (gecko-3/b-linux)" {
+		t.Fatalf("unexpected breadcrumb: %q", text)
+	}
+}
+
+func TestRenderBreadcrumbsMultiLevelStack(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.stack.Push(View{ResourceName: "workerpools", Kind: ListKind})
+	s.stack.Push(View{ResourceName: "workers", Kind: ListKind, Scope: "gecko-3/b-linux"})
+	s.stack.Push(View{ResourceName: "worker", Kind: DetailKind, SelectedID: "worker-1"})
+
+	s.renderBreadcrumbs()
+
+	text := strings.TrimSpace(s.footerBreadcrumb.GetText(false))
+	want := "workerpools › workers (gecko-3/b-linux) › worker:worker-1"
+	if text != want {
+		t.Fatalf("unexpected breadcrumb: got %q, want %q", text, want)
 	}
 }
 
@@ -76,7 +126,7 @@ func TestHandleFooterInputDonePromptWithIDNavigatesAndCloses(t *testing.T) {
 
 	s.handleFooterInputDone(tcell.KeyEnter)
 
-	if s.footerMode != footerHints {
+	if s.footerMode != footerIdle {
 		t.Fatalf("expected footer to close, got mode %v", s.footerMode)
 	}
 	if s.pendingLookup != nil {
@@ -113,7 +163,7 @@ func TestHandleFooterInputDonePromptEscapeCancels(t *testing.T) {
 
 	s.handleFooterInputDone(tcell.KeyEscape)
 
-	if s.footerMode != footerHints {
+	if s.footerMode != footerIdle {
 		t.Fatalf("expected footer to close, got mode %v", s.footerMode)
 	}
 	if s.pendingLookup != nil {

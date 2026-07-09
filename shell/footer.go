@@ -11,28 +11,109 @@ import (
 )
 
 func (s *Shell) initFooter() {
-	s.footerHint = tview.NewTextView().SetDynamicColors(true)
+	s.footerBreadcrumb = tview.NewTextView().SetDynamicColors(true)
 	s.footerInput = tview.NewInputField().SetFieldWidth(0)
 	s.footerInput.SetDoneFunc(s.handleFooterInputDone)
 	s.footerInput.SetChangedFunc(s.handleFooterInputChanged)
 
 	s.footer = tview.NewPages().
-		AddPage(pageFooterHints, s.footerHint, true, true).
+		AddPage(pageFooterBreadcrumb, s.footerBreadcrumb, true, true).
 		AddPage(pageFooterInput, s.footerInput, true, false)
 
-	s.renderFooterHints()
+	s.renderHeaderHints()
+	s.renderBreadcrumbs()
 }
 
-func (s *Shell) renderFooterHints() {
-	hint := " [yellow]q[white] quit   [yellow]:[white] command   [yellow]/[white] filter   [yellow]Esc[white] back/quit   [yellow]?[white] help"
+// hintColumns caps how many hints share a line in the header's center
+// column, laid out as a left-aligned grid (k9s-style) rather than relying
+// on the terminal's own wrapping, which would break a hint mid-string (e.g.
+// splitting "Esc" from "back/quit") on a narrow terminal.
+const hintColumns = 3
+
+// headerHintGap is the minimum number of spaces separating one hint column
+// from the next.
+const headerHintGap = 3
+
+// hint pairs a hint's plain-text form (used to measure column width, since
+// tview's [color] region tags aren't rendered) with its colored form
+// (what's actually shown).
+type hint struct {
+	plain   string
+	colored string
+}
+
+// renderHeaderHints rebuilds the header's center hint column: global keys,
+// the facet-switch hint when the current list has facets, and any
+// per-detail-action keys the current detail screen exposes. Hints are laid
+// out as a left-aligned grid of hintColumns columns, each padded to the
+// width of the longest hint, rather than centered free text.
+func (s *Shell) renderHeaderHints() {
+	hints := []hint{
+		{"q quit", "[yellow]q[white] quit"},
+		{": command", "[yellow]:[white] command"},
+		{"/ filter", "[yellow]/[white] filter"},
+		{"Esc back/quit", "[yellow]Esc[white] back/quit"},
+		{"? help", "[yellow]?[white] help"},
+	}
 	if s.hasFacets() {
-		hint += "   [yellow]Tab[white]/[yellow]Shift+Tab[white] switch state"
+		hints = append(hints, hint{"Tab/Shift+Tab switch state", "[yellow]Tab[white]/[yellow]Shift+Tab[white] switch state"})
 	}
 	for _, action := range s.currentDetailActions {
-		hint += fmt.Sprintf("   [yellow]<%c>[white] %s", action.Key, action.Label)
+		hints = append(hints, hint{
+			plain:   fmt.Sprintf("<%c> %s", action.Key, action.Label),
+			colored: fmt.Sprintf("[yellow]<%c>[white] %s", action.Key, action.Label),
+		})
 	}
 
-	s.footerHint.SetText(hint)
+	// Each column is only as wide as the widest hint that actually falls in
+	// it, not the widest hint overall — otherwise one long hint (e.g. the
+	// facet-switch hint) in one column would pad every column to its width.
+	colWidth := make([]int, hintColumns)
+	for i, h := range hints {
+		col := i % hintColumns
+		if len(h.plain) > colWidth[col] {
+			colWidth[col] = len(h.plain)
+		}
+	}
+
+	var b strings.Builder
+	for i, h := range hints {
+		col := i % hintColumns
+		if col == 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString(h.colored)
+
+		lastInRow := col == hintColumns-1 || i == len(hints)-1
+		if !lastInRow {
+			b.WriteString(strings.Repeat(" ", colWidth[col]-len(h.plain)+headerHintGap))
+		} else if i != len(hints)-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	s.headerHint.SetText(b.String())
+}
+
+// renderBreadcrumbs rebuilds the footer's navigation trail from the current
+// view stack, e.g. "workerpools › gecko-3/b-linux (workers)".
+func (s *Shell) renderBreadcrumbs() {
+	views := s.stack.views
+	parts := make([]string, len(views))
+	for i, v := range views {
+		switch v.Kind {
+		case DetailKind:
+			parts[i] = fmt.Sprintf("%s:%s", v.ResourceName, v.SelectedID)
+		default:
+			if v.Scope != "" {
+				parts[i] = fmt.Sprintf("%s (%s)", v.ResourceName, v.Scope)
+			} else {
+				parts[i] = v.ResourceName
+			}
+		}
+	}
+
+	s.footerBreadcrumb.SetText(" " + strings.Join(parts, " › "))
 }
 
 func (s *Shell) openCommandBar() {
@@ -61,9 +142,8 @@ func (s *Shell) openIDPrompt(res resource.DirectLookup) {
 }
 
 func (s *Shell) closeFooterInput() {
-	s.footerMode = footerHints
-	s.footer.SwitchToPage(pageFooterHints)
-	s.renderFooterHints()
+	s.footerMode = footerIdle
+	s.footer.SwitchToPage(pageFooterBreadcrumb)
 	s.app.SetFocus(s.activeContent)
 }
 

@@ -264,6 +264,8 @@ func (s *Shell) renderList(res resource.Resource, scope string) {
 		s.currentFacetValue = s.facetByResource[res.Name()] // "" (All) if never set
 	}
 
+	s.renderHeaderHints()
+	s.renderBreadcrumbs()
 	s.setTitle("Loading " + res.Name() + "...")
 	s.table.SetData(s.currentColumns, nil, s.currentSort)
 	s.renderTabsBar(nil)
@@ -303,9 +305,8 @@ func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, coun
 	s.refreshTable()
 	s.activeContent = s.table
 	s.setTitle(res.Name())
-	if s.footerMode == footerHints {
-		s.renderFooterHints()
-	}
+	s.renderHeaderHints()
+	s.renderBreadcrumbs()
 }
 
 // loadList fetches this view's rows: via ServerFaceted.FacetList(scope,
@@ -383,6 +384,8 @@ func (s *Shell) renderDetail(res resource.Resource, id string) {
 	s.currentDetailActions = nil
 	s.closeFooterInput()
 
+	s.renderHeaderHints()
+	s.renderBreadcrumbs()
 	s.setTitle("Loading " + res.Name() + "...")
 	s.detail.SetData(resource.Detail{})
 	s.content.SwitchToPage(pageDetail)
@@ -413,9 +416,8 @@ func (s *Shell) loadDetail(res resource.Resource, id string, isInitial bool) {
 			s.currentDetailActions = detail.Actions
 			s.activeContent = s.detail
 			s.setTitle(detail.Title)
-			if s.footerMode == footerHints {
-				s.renderFooterHints()
-			}
+			s.renderHeaderHints()
+			s.renderBreadcrumbs()
 		})
 	}()
 }
@@ -433,5 +435,5 @@ func (s *Shell) showError(title string, err error, retry func()) {
 }
 
 func (s *Shell) showTransientWarning(msg string) {
-	s.footerHint.SetText(fmt.Sprintf("[red]%s[white]", msg))
+	s.footerBreadcrumb.SetText(fmt.Sprintf("[red]%s[white]", msg))
 }

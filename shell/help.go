@@ -95,7 +95,7 @@ func buildHelpText(registry *resource.Registry) string {
 	}
 
 	b.WriteString("[green]Context actions[white]\n\n")
-	b.WriteString("  Some detail screens expose extra keys (e.g. <w> workers) shown in that screen's own footer hint bar when available.\n")
+	b.WriteString("  Some detail screens expose extra keys (e.g. <w> workers) shown in that screen's own header hint bar when available.\n")
 
 	return b.String()
 }

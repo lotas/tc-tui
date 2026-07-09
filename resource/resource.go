@@ -34,7 +34,7 @@ type NavTarget struct {
 	Kind         NavTargetKind
 }
 
-// DetailAction is a keybinding shown in a Detail view's footer hints that
+// DetailAction is a keybinding shown in a Detail view's header hints that
 // navigates to another resource/id when pressed.
 type DetailAction struct {
 	Key    rune

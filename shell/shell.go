@@ -15,14 +15,14 @@ const (
 	pageError  = "error"
 	pageHelp   = "help"
 
-	pageFooterHints = "hints"
-	pageFooterInput = "input"
+	pageFooterBreadcrumb = "breadcrumb"
+	pageFooterInput      = "input"
 )
 
 type footerMode int
 
 const (
-	footerHints footerMode = iota
+	footerIdle footerMode = iota
 	footerCommand
 	footerFilter
 	footerPrompt
@@ -36,9 +36,9 @@ type Shell struct {
 	registry *resource.Registry
 	stack    *ViewStack
 
-	root        *tview.Grid
-	headerLeft  *tview.TextView
-	headerRight *tview.TextView
+	root       *tview.Grid
+	headerLeft *tview.TextView
+	headerHint *tview.TextView
 
 	content   *tview.Pages
 	table     *TableView
@@ -49,11 +49,11 @@ type Shell struct {
 	helpOpen    bool
 	preHelpPage string
 
-	footer        *tview.Pages
-	footerHint    *tview.TextView
-	footerInput   *tview.InputField
-	footerMode    footerMode
-	pendingLookup resource.Resource // set while footerMode == footerPrompt; the resource awaiting an id
+	footer           *tview.Pages
+	footerBreadcrumb *tview.TextView
+	footerInput      *tview.InputField
+	footerMode       footerMode
+	pendingLookup    resource.Resource // set while footerMode == footerPrompt; the resource awaiting an id
 
 	currentListResource  string
 	currentColumns       []resource.Column
@@ -96,10 +96,10 @@ func New(registry *resource.Registry) *Shell {
 }
 
 func (s *Shell) init() {
-	s.headerLeft = tview.NewTextView().SetDynamicColors(true).
+	s.headerLeft = tview.NewTextView().SetDynamicColors(true).SetWordWrap(true).
 		SetChangedFunc(func() { s.app.Draw() })
-	s.headerRight = tview.NewTextView().SetDynamicColors(true).
-		SetTextAlign(tview.AlignRight).
+	s.headerHint = tview.NewTextView().SetDynamicColors(true).SetWordWrap(true).
+		SetTextAlign(tview.AlignLeft).
 		SetChangedFunc(func() { s.app.Draw() })
 
 	s.table = NewTableView()
@@ -138,9 +138,9 @@ func (s *Shell) init() {
 
 	s.initFooter()
 
-	s.root = tview.NewGrid().SetRows(2, 0, 1).SetColumns(0, 0)
+	s.root = tview.NewGrid().SetRows(3, 0, 1).SetColumns(-1, -1)
 	s.root.AddItem(s.headerLeft, 0, 0, 1, 1, 0, 0, false)
-	s.root.AddItem(s.headerRight, 0, 1, 1, 1, 0, 0, false)
+	s.root.AddItem(s.headerHint, 0, 1, 1, 1, 0, 0, false)
 	s.root.AddItem(s.content, 1, 0, 1, 2, 0, 0, true)
 	s.root.AddItem(s.footer, 2, 0, 1, 2, 0, 0, false)
 
@@ -157,7 +157,7 @@ func (s *Shell) init() {
 // swallowed except q, Esc/`?`, and the scroll keys.
 func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	if s.helpOpen {
-		if s.footerMode == footerHints && isQuitKey(event) {
+		if s.footerMode == footerIdle && isQuitKey(event) {
 			s.Stop()
 			return nil
 		}
@@ -175,7 +175,7 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	}
 
-	if s.footerMode != footerHints {
+	if s.footerMode != footerIdle {
 		return event
 	}
 
@@ -236,8 +236,8 @@ func (s *Shell) setTitle(title string) {
 	s.content.SetTitle(formatted)
 }
 
-// SetInfo renders the persistent header bar (Taskcluster root/version/client
-// info), replacing the old ui.UI.SetTaskclusterInfo.
+// SetInfo renders the persistent header bar's left block (Taskcluster
+// root/version/client info), replacing the old ui.UI.SetTaskclusterInfo.
 func (s *Shell) SetInfo(root, version, clientID string, authenticated bool) {
 	clientColor := "yellow"
 	clientExtra := ""
@@ -247,10 +247,9 @@ func (s *Shell) SetInfo(root, version, clientID string, authenticated bool) {
 	}
 
 	s.headerLeft.SetText(fmt.Sprintf(
-		" Taskcluster version: [yellow]%s[white]\n Client ID: [%s]%s[gray]%s[white]",
-		version, clientColor, clientID, clientExtra,
+		" [green]%s[white]\n Taskcluster version: [yellow]%s[white]\n Client ID: [%s]%s[gray]%s[white]",
+		root, version, clientColor, clientID, clientExtra,
 	))
-	s.headerRight.SetText(fmt.Sprintf(" [green]%s[white] ", root))
 }
 
 // Start pushes the given resource as the root view and runs the tview event
