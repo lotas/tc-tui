@@ -205,10 +205,17 @@ func (s *Shell) toggleSort(column int) {
 }
 
 // refreshTable recomputes the table's displayed rows from s.lastRows by
-// applying the current filter, facet, then sort, and re-renders. This is
-// the single place list-view rows get filtered/sorted — call it any time
-// s.lastRows, s.filterQuery, s.currentFacetValue, or s.currentSort changes.
+// applying the current filter, facet, then sort, and re-renders; it also
+// updates the title to show the active filter, if any. This is the single
+// place list-view rows get filtered/sorted — call it any time s.lastRows,
+// s.filterQuery, s.currentFacetValue, or s.currentSort changes.
 func (s *Shell) refreshTable() {
+	title := s.currentListResource
+	if s.filterQuery != "" {
+		title += " (" + s.filterQuery + ")"
+	}
+	s.setTitle(title)
+
 	rows := FilterRows(s.lastRows, s.filterQuery)
 	s.renderTabsBar(rows)
 
@@ -336,7 +343,6 @@ func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, coun
 	}
 	s.refreshTable()
 	s.activeContent = s.table
-	s.setTitle(res.Name())
 	s.renderHeaderHints()
 	s.renderBreadcrumbs()
 }

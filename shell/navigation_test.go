@@ -168,6 +168,25 @@ func TestRenderListDefaultsToEmptyFilterQueryWhenNeverSet(t *testing.T) {
 	}
 }
 
+func TestRefreshTableShowsActiveFilterInTitle(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentListResource = "workerpools"
+	s.currentColumns = []resource.Column{{Title: "NAME"}}
+	s.lastRows = []resource.Row{{ID: "a", Cells: []string{"aws-1"}}}
+
+	s.filterQuery = "aws"
+	s.refreshTable()
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: workerpools (aws) ]"; got != want {
+		t.Fatalf("title with active filter = %q, want %q", got, want)
+	}
+
+	s.filterQuery = ""
+	s.refreshTable()
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: workerpools ]"; got != want {
+		t.Fatalf("title with cleared filter = %q, want %q", got, want)
+	}
+}
+
 func TestRefreshTableSkipsClientFilterForServerFaceted(t *testing.T) {
 	s := New(resource.NewRegistry())
 	s.currentListResource = "workers"
