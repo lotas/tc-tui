@@ -11,7 +11,7 @@ import (
 // tables). It renders whatever Resource.Columns()/List() gives it.
 type TableView struct {
 	*tview.Table
-	onSelect func(id string)
+	onSelect func(row resource.Row)
 
 	// lastSelectedID remembers the Row.ID of whichever row the cursor is
 	// currently on, updated via SetSelectionChangedFunc (which fires on
@@ -37,12 +37,12 @@ func NewTableView() *TableView {
 			return
 		}
 
-		id, ok := cell.GetReference().(string)
+		r, ok := cell.GetReference().(resource.Row)
 		if !ok {
 			return
 		}
 
-		t.onSelect(id)
+		t.onSelect(r)
 	})
 	t.SetSelectionChangedFunc(func(row, column int) {
 		if row == 0 {
@@ -54,18 +54,18 @@ func NewTableView() *TableView {
 			return
 		}
 
-		id, ok := cell.GetReference().(string)
+		r, ok := cell.GetReference().(resource.Row)
 		if !ok {
 			return
 		}
 
-		t.lastSelectedID = id
+		t.lastSelectedID = r.ID
 	})
 
 	return t
 }
 
-func (t *TableView) SetOnSelect(fn func(id string)) {
+func (t *TableView) SetOnSelect(fn func(row resource.Row)) {
 	t.onSelect = fn
 }
 
@@ -77,10 +77,11 @@ func (t *TableView) ResetSelection() {
 	t.lastSelectedID = ""
 }
 
-// SetData replaces the table's header and rows. Row IDs are stashed on
-// each row's first cell via SetReference so selection can look them up
-// without a separate index-to-ID slice. If sort.Direction is not SortNone,
-// a ▲/▼ indicator is appended to that column's header text.
+// SetData replaces the table's header and rows. Each row's first cell holds
+// a reference to the whole resource.Row (not just its ID), so selection can
+// read row.NavTarget as well as row.ID without a separate index-to-row
+// lookup. If sort.Direction is not SortNone, a ▲/▼ indicator is appended to
+// that column's header text.
 func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort SortState) {
 	t.Clear()
 
@@ -110,7 +111,7 @@ func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort
 		for col, value := range row.Cells {
 			cell := tview.NewTableCell(value)
 			if col == 0 {
-				cell.SetReference(row.ID)
+				cell.SetReference(row)
 			}
 			if columns[col].Width == 0 {
 				cell.SetExpansion(1)

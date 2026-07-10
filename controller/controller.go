@@ -37,6 +37,7 @@ func NewController() TcController {
 	registry.Register(resource.NewTasksResource(tc))
 	registry.Register(resource.NewPendingTasksResource(tc))
 	registry.Register(resource.NewClaimedTasksResource(tc))
+	registry.Register(resource.NewHistoryResource())
 
 	sh := shell.New(registry)
 

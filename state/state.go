@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // State is the full persisted snapshot of a Shell's navigation state. Kind
@@ -19,6 +20,19 @@ type State struct {
 	SortByResource   map[string]SortState `json:"sortByResource"`
 	FacetByResource  map[string]string    `json:"facetByResource"`
 	FilterByResource map[string]string    `json:"filterByResource"`
+	History          []HistoryEntry       `json:"history"`
+}
+
+// HistoryEntry mirrors resource.HistoryEntry (this package stays
+// dependency-free rather than importing resource, same reasoning as
+// ViewState mirroring shell.ViewKind).
+type HistoryEntry struct {
+	ResourceName string    `json:"resourceName"`
+	Kind         int       `json:"kind"`
+	SelectedID   string    `json:"selectedID"`
+	Scope        string    `json:"scope"`
+	Title        string    `json:"title"`
+	VisitedAt    time.Time `json:"visitedAt"`
 }
 
 type ViewState struct {

@@ -13,6 +13,11 @@ type Column struct {
 type Row struct {
 	ID    string
 	Cells []string
+	// NavTarget, if non-nil, overrides the default "select this row → open
+	// Detail for (the resource currently listed, row.ID)" behavior. Only
+	// HistoryResource sets this today — every other resource's rows leave it
+	// nil and get today's behavior unchanged.
+	NavTarget *NavTarget
 }
 
 // NavTargetKind distinguishes what a NavTarget navigates to.

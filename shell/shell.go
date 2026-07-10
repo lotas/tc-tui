@@ -81,12 +81,41 @@ type Shell struct {
 
 	cache *listCache
 
-	// restoring and restoreFallback support Start's initial restore-from-state
-	// render: while restoring is true, an initial-load failure pops the
-	// restored stack and retries the next view down instead of showing the
-	// error screen; restoreFallback is the resource to fall back to once the
-	// stack empties out.
-	restoring       bool
+	// historyRecorder is resolved once, in init(), from whatever resource is
+	// registered under the name "history" (nil if none is — e.g. a minimal
+	// test registry). Every recording call in loadList/loadDetail is a no-op
+	// when this is nil.
+	historyRecorder resource.HistoryRecorder
+
+	// loadGeneration is incremented once per genuine navigation/render
+	// dispatch of loadList/loadDetail (isInitial=true — a real navigation,
+	// a restore-replay, or a facet-tab switch). A background refresh tick
+	// (isInitial=false, used exclusively by Invalidate) does NOT increment
+	// it — it captures whichever generation is already current instead,
+	// inheriting the epoch of the view it's refreshing rather than
+	// starting a new one. See nextLoadGeneration (navigation.go), the
+	// single place that decides this capture behavior for both
+	// loadList/loadDetail. Every dispatch's completion (refresh or
+	// navigation) checks its captured generation against the current
+	// value unconditionally: a captured value that no longer matches means
+	// a newer navigation has started since — even one that later returns
+	// to the identical View (isTopView would match again in that case, but
+	// the generation correctly still doesn't) — and this completion must
+	// no-op regardless of success or failure.
+	//
+	// Only ever mutated/read on tview's single event-loop goroutine (input
+	// captures, Start's initial dispatch before app.Run(), and
+	// QueueUpdateDraw callbacks are all serialized onto it) — never call
+	// loadList/loadDetail from a raw `go` statement, or this increment
+	// becomes a data race and two dispatches could capture the same value.
+	loadGeneration int
+
+	// restoreFallback is the resource Start falls back to once a restored
+	// stack (if any) has been fully drained — either because it was empty to
+	// begin with, or because every restored view turned out to be
+	// unresolvable/stale. See renderRestoredTop/loadList/loadDetail's
+	// isRestore argument for how an in-progress restore is now tracked (a
+	// per-call argument, not a field).
 	restoreFallback string
 }
 
@@ -106,6 +135,10 @@ func New(registry *resource.Registry) *Shell {
 }
 
 func (s *Shell) init() {
+	if hr, ok := s.registry.Resolve("history"); ok {
+		s.historyRecorder, _ = hr.(resource.HistoryRecorder)
+	}
+
 	s.headerLeft = tview.NewTextView().SetDynamicColors(true).SetWordWrap(true).
 		SetChangedFunc(func() { s.app.Draw() })
 	s.headerHint = tview.NewTextView().SetDynamicColors(true).SetWordWrap(true).
@@ -113,8 +146,12 @@ func (s *Shell) init() {
 		SetChangedFunc(func() { s.app.Draw() })
 
 	s.table = NewTableView()
-	s.table.SetOnSelect(func(id string) {
-		s.showDetail(s.currentListResource, id)
+	s.table.SetOnSelect(func(row resource.Row) {
+		if row.NavTarget != nil {
+			s.navigateTo(*row.NavTarget)
+			return
+		}
+		s.showDetail(s.currentListResource, row.ID)
 	})
 
 	s.tabsBar = tview.NewTextView().SetDynamicColors(true)
@@ -127,12 +164,7 @@ func (s *Shell) init() {
 
 	s.detail = NewDetailView()
 	s.detail.SetOnAction(func(target resource.NavTarget) {
-		switch target.Kind {
-		case resource.NavScopedList:
-			s.pushScopedList(target.ResourceName, target.ID)
-		default:
-			s.showDetail(target.ResourceName, target.ID)
-		}
+		s.navigateTo(target)
 	})
 
 	s.errorView = NewErrorView()

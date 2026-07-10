@@ -44,19 +44,20 @@ func SortRows(rows []resource.Row, state SortState) []resource.Row {
 		a := strings.TrimSpace(sorted[i].Cells[state.Column])
 		b := strings.TrimSpace(sorted[j].Cells[state.Column])
 
-		var less bool
 		if numeric {
 			af, _ := strconv.ParseFloat(a, 64)
 			bf, _ := strconv.ParseFloat(b, 64)
-			less = af < bf
-		} else {
-			less = strings.ToLower(a) < strings.ToLower(b)
+			if state.Direction == SortDesc {
+				return af > bf
+			}
+			return af < bf
 		}
 
+		al, bl := strings.ToLower(a), strings.ToLower(b)
 		if state.Direction == SortDesc {
-			return !less
+			return al > bl
 		}
-		return less
+		return al < bl
 	})
 
 	return sorted

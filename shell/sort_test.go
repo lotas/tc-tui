@@ -114,3 +114,37 @@ func TestSortRowsEmptyDoesNotPanic(t *testing.T) {
 		t.Fatalf("expected empty result, got %+v", sorted)
 	}
 }
+
+func TestSortRowsDescendingWithDuplicateValuesIsStable(t *testing.T) {
+	rows := []resource.Row{
+		{ID: "first", Cells: []string{"same"}},
+		{ID: "second", Cells: []string{"same"}},
+		{ID: "third", Cells: []string{"same"}},
+		{ID: "fourth", Cells: []string{"zzz"}},
+	}
+
+	sorted := SortRows(rows, SortState{Column: 0, Direction: SortDesc})
+
+	// "zzz" > "same", so fourth sorts first; the three tied "same" rows must
+	// keep their original relative order (stable), not merely "some order" —
+	// the pre-fix comparator violated strict-weak-ordering for equal keys,
+	// which sort.SliceStable does not define as safe.
+	if len(sorted) != 4 || sorted[0].ID != "fourth" || sorted[1].ID != "first" ||
+		sorted[2].ID != "second" || sorted[3].ID != "third" {
+		t.Fatalf("expected [fourth,first,second,third], got %+v", sorted)
+	}
+}
+
+func TestSortRowsNumericDescendingWithDuplicateValuesIsStable(t *testing.T) {
+	rows := []resource.Row{
+		{ID: "first", Cells: []string{"5"}},
+		{ID: "second", Cells: []string{"5"}},
+		{ID: "third", Cells: []string{"9"}},
+	}
+
+	sorted := SortRows(rows, SortState{Column: 0, Direction: SortDesc})
+
+	if len(sorted) != 3 || sorted[0].ID != "third" || sorted[1].ID != "first" || sorted[2].ID != "second" {
+		t.Fatalf("expected [third,first,second], got %+v", sorted)
+	}
+}

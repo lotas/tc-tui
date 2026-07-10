@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSanitize(t *testing.T) {
@@ -75,5 +76,43 @@ func TestLoadCorruptFile(t *testing.T) {
 	got := Load(path)
 	if len(got.Stack) != 0 || len(got.SortByResource) != 0 || len(got.FacetByResource) != 0 {
 		t.Errorf("Load of corrupt file = %+v, want zero value", got)
+	}
+}
+
+func TestSaveLoadRoundTripIncludesHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	want := State{
+		History: []HistoryEntry{
+			{
+				ResourceName: "workers", Kind: 1, SelectedID: "worker-1",
+				Title:     "Worker :: worker-1",
+				VisitedAt: time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC),
+			},
+			{
+				ResourceName: "workers", Kind: 0, Scope: "pool-a",
+				VisitedAt: time.Date(2026, 7, 10, 11, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	if err := Save(path, want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got := Load(path)
+
+	if len(got.History) != len(want.History) {
+		t.Fatalf("History length = %d, want %d", len(got.History), len(want.History))
+	}
+	for i := range want.History {
+		if !got.History[i].VisitedAt.Equal(want.History[i].VisitedAt) {
+			t.Errorf("History[%d].VisitedAt = %v, want %v", i, got.History[i].VisitedAt, want.History[i].VisitedAt)
+		}
+		gotCopy, wantCopy := got.History[i], want.History[i]
+		gotCopy.VisitedAt, wantCopy.VisitedAt = time.Time{}, time.Time{}
+		if gotCopy != wantCopy {
+			t.Errorf("History[%d] = %+v, want %+v", i, got.History[i], want.History[i])
+		}
 	}
 }

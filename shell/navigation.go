@@ -37,7 +37,7 @@ func (s *Shell) switchResource(nameOrAlias, scope string) {
 	}
 
 	s.stack.ResetTo(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope})
-	s.renderList(res, scope)
+	s.renderList(res, scope, false)
 }
 
 // switchToDetail resets the navigation stack to a Detail view for res/id —
@@ -46,7 +46,7 @@ func (s *Shell) switchResource(nameOrAlias, scope string) {
 // when <id> is omitted.
 func (s *Shell) switchToDetail(res resource.Resource, id string) {
 	s.stack.ResetTo(View{ResourceName: res.Name(), Kind: DetailKind, SelectedID: id})
-	s.renderDetail(res, id)
+	s.renderDetail(res, id, false)
 }
 
 // showDetail pushes a Detail view for id onto the stack.
@@ -58,7 +58,7 @@ func (s *Shell) showDetail(resourceName, id string) {
 	}
 
 	s.stack.Push(View{ResourceName: res.Name(), Kind: DetailKind, SelectedID: id})
-	s.renderDetail(res, id)
+	s.renderDetail(res, id, false)
 }
 
 // pushScopedList pushes a List view scoped to scope onto the stack — what a
@@ -73,21 +73,32 @@ func (s *Shell) pushScopedList(resourceName, scope string) {
 	}
 
 	s.stack.Push(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope})
-	s.renderList(res, scope)
+	s.renderList(res, scope, false)
+}
+
+// navigateTo executes a NavTarget the same way regardless of where it came
+// from — a Detail view's action keybinding or a list row's NavTarget
+// override (e.g. HistoryResource's rows).
+func (s *Shell) navigateTo(target resource.NavTarget) {
+	switch target.Kind {
+	case resource.NavScopedList:
+		s.pushScopedList(target.ResourceName, target.ID)
+	default:
+		s.showDetail(target.ResourceName, target.ID)
+	}
 }
 
 // renderRestoredTop renders the current stack's top view — called once from
-// Start with a stack populated by RestoreState (if any). While s.restoring is
-// true, a resolve/fetch failure for that view pops it and retries the next
-// one down instead of showing the error screen (set in loadList/loadDetail's
-// initial-failure branch), so a stale restored view (e.g. an entity deleted
-// since the last session) falls back through the breadcrumb trail silently.
-// Once the stack empties out, it falls back to s.restoreFallback exactly as a
-// fresh launch would.
+// Start with a stack populated by RestoreState (if any). It renders with
+// isRestore=true, so a resolve/fetch failure for that view pops it and
+// retries the next one down instead of showing the error screen (see
+// loadList/loadDetail's isRestore-failure branch), so a stale restored view
+// (e.g. an entity deleted since the last session) falls back through the
+// breadcrumb trail silently. Once the stack empties out, it falls back to
+// s.restoreFallback exactly as a fresh launch would.
 func (s *Shell) renderRestoredTop() {
 	top, ok := s.stack.Top()
 	if !ok {
-		s.restoring = false
 		s.switchResource(s.restoreFallback, "")
 		return
 	}
@@ -99,12 +110,11 @@ func (s *Shell) renderRestoredTop() {
 		return
 	}
 
-	s.restoring = true
 	switch top.Kind {
 	case ListKind:
-		s.renderList(res, top.Scope)
+		s.renderList(res, top.Scope, true)
 	case DetailKind:
-		s.renderDetail(res, top.SelectedID)
+		s.renderDetail(res, top.SelectedID, true)
 	}
 }
 
@@ -130,9 +140,9 @@ func (s *Shell) goBack() {
 
 	switch top.Kind {
 	case ListKind:
-		s.renderList(res, top.Scope)
+		s.renderList(res, top.Scope, false)
 	case DetailKind:
-		s.renderDetail(res, top.SelectedID)
+		s.renderDetail(res, top.SelectedID, false)
 	}
 }
 
@@ -166,7 +176,7 @@ func (s *Shell) cycleFacet(direction int) {
 		res := s.currentServerFaceted
 		s.setTitle("Loading " + res.Name() + "...")
 		s.table.SetData(s.currentColumns, nil, s.currentSort)
-		s.loadList(res, top.Scope, s.currentFacetValue, true, false)
+		s.loadList(res, top.Scope, s.currentFacetValue, true, false, false)
 
 	case s.currentFaceted != nil:
 		rows := FilterRows(s.lastRows, s.filterQuery)
@@ -282,7 +292,7 @@ func (s *Shell) renderTabsBar(rows []resource.Row) {
 	s.tabsBar.SetText(" " + b.String())
 }
 
-func (s *Shell) renderList(res resource.Resource, scope string) {
+func (s *Shell) renderList(res resource.Resource, scope string, isRestore bool) {
 	s.currentDetailActions = nil
 	s.closeFooterInput()
 	s.filterQuery = s.filterByResource[res.Name()] // "" if never set
@@ -312,7 +322,7 @@ func (s *Shell) renderList(res resource.Resource, scope string) {
 	s.app.SetFocus(s.table)
 
 	s.startRefreshLoop(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope}, res.RefreshInterval())
-	s.loadList(res, scope, s.currentFacetValue, true, false)
+	s.loadList(res, scope, s.currentFacetValue, true, false, isRestore)
 }
 
 // restoreFacetValue returns the remembered facet value for name if it's
@@ -347,6 +357,23 @@ func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, coun
 	s.renderBreadcrumbs()
 }
 
+// nextLoadGeneration returns the generation the caller's dispatch should
+// capture. A genuine navigation dispatch (isInitial=true — a real
+// navigation, a restore-replay, or a facet-tab switch) starts a NEW
+// generation (increments first). A background refresh tick (isInitial=false,
+// used exclusively by Invalidate) instead just returns whichever generation
+// is already current, inheriting the epoch of the view it's refreshing
+// rather than starting its own or being exempt from the mechanism entirely.
+// This is the single place that decides capture behavior for both loadList
+// and loadDetail — see loadGeneration's doc comment in shell.go for how the
+// captured value is later used.
+func (s *Shell) nextLoadGeneration(isInitial bool) int {
+	if isInitial {
+		s.loadGeneration++
+	}
+	return s.loadGeneration
+}
+
 // loadList fetches this view's rows: via ServerFaceted.FacetList(scope,
 // facetValue) if the resource implements it, otherwise via ScopedList(scope)
 // (if scope is non-empty) or List(). Passing facetValue explicitly (rather
@@ -357,19 +384,34 @@ func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, coun
 // full-screen error with retry) from a background refresh tick that hasn't
 // (failure shows a transient warning and keeps the last-good render) — tab
 // switches themselves pass isInitial=true, since they're a deliberate user
-// action.
+// action. isRestore is true only for the one call renderRestoredTop itself
+// issues for the view it's replaying — every other caller passes false.
 //
 // Unless forceRefresh is set, this first checks the cache for this
 // (resource, scope, facetValue) key and, on a hit, applies it synchronously
 // — no goroutine, no network call. forceRefresh is set only by the
 // auto-refresh ticker (Invalidate), whose whole purpose is to get a
 // genuinely fresh result for the view currently on screen.
-func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInitial, forceRefresh bool) {
+func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInitial, forceRefresh, isRestore bool) {
+	gen := s.nextLoadGeneration(isInitial)
+
 	key := cacheKeyFor(res, scope, facetValue)
+
+	recordVisit := func() {
+		if isInitial && !isRestore && scope != "" && res.Name() != "history" && s.historyRecorder != nil {
+			s.historyRecorder.Record(resource.HistoryEntry{
+				ResourceName: res.Name(),
+				Kind:         int(ListKind),
+				Scope:        scope,
+				VisitedAt:    time.Now(),
+			})
+		}
+	}
 
 	if !forceRefresh {
 		if entry, ok := s.cache.get(key, res.RefreshInterval()); ok {
 			s.applyListResult(res, entry.rows, entry.counts)
+			recordVisit() // <-- new
 			return
 		}
 	}
@@ -396,6 +438,9 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 		}
 
 		s.app.QueueUpdateDraw(func() {
+			if s.isStaleLoad(gen) {
+				return // a newer navigation dispatch has started since — even for the same View
+			}
 			if !s.isTopView(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope}) {
 				return
 			}
@@ -404,28 +449,31 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 			}
 
 			if err != nil {
-				if s.restoring {
-					s.restoring = false
+				// isRestore must be checked before isInitial: renderRestoredTop
+				// always dispatches with isInitial=true, so swapping this order
+				// would route a restore-chain failure into showError instead of
+				// the silent pop-and-retry.
+				if isRestore {
 					s.stack.Pop()
 					s.renderRestoredTop()
 					return
 				}
 				if isInitial {
-					s.showError(res.Name(), err, func() { s.renderList(res, scope) })
+					s.showError(res.Name(), err, func() { s.renderList(res, scope, false) })
 				} else {
 					s.showTransientWarning(fmt.Sprintf("refresh failed: %s", err))
 				}
 				return
 			}
 
-			s.restoring = false
 			s.cache.set(key, cacheEntry{rows: rows, counts: counts, fetchedAt: time.Now()})
 			s.applyListResult(res, rows, counts)
+			recordVisit() // <-- new
 		})
 	}()
 }
 
-func (s *Shell) renderDetail(res resource.Resource, id string) {
+func (s *Shell) renderDetail(res resource.Resource, id string, isRestore bool) {
 	s.currentDetailActions = nil
 	s.closeFooterInput()
 
@@ -437,39 +485,56 @@ func (s *Shell) renderDetail(res resource.Resource, id string) {
 	s.app.SetFocus(s.detail)
 
 	s.startRefreshLoop(View{ResourceName: res.Name(), Kind: DetailKind, SelectedID: id}, res.RefreshInterval())
-	s.loadDetail(res, id, true)
+	s.loadDetail(res, id, true, isRestore)
 }
 
-func (s *Shell) loadDetail(res resource.Resource, id string, isInitial bool) {
+func (s *Shell) loadDetail(res resource.Resource, id string, isInitial, isRestore bool) {
+	gen := s.nextLoadGeneration(isInitial)
+
 	go func() {
 		detail, err := res.Describe(id)
 		s.app.QueueUpdateDraw(func() {
+			if s.isStaleLoad(gen) {
+				return // a newer navigation dispatch has started since — even for the same View
+			}
 			if !s.isTopView(View{ResourceName: res.Name(), Kind: DetailKind, SelectedID: id}) {
 				return
 			}
 
 			if err != nil {
-				if s.restoring {
-					s.restoring = false
+				// isRestore must be checked before isInitial: renderRestoredTop
+				// always dispatches with isInitial=true, so swapping this order
+				// would route a restore-chain failure into showError instead of
+				// the silent pop-and-retry.
+				if isRestore {
 					s.stack.Pop()
 					s.renderRestoredTop()
 					return
 				}
 				if isInitial {
-					s.showError(fmt.Sprintf("%s %s", res.Name(), id), err, func() { s.renderDetail(res, id) })
+					s.showError(fmt.Sprintf("%s %s", res.Name(), id), err, func() { s.renderDetail(res, id, false) })
 				} else {
 					s.showTransientWarning(fmt.Sprintf("refresh failed: %s", err))
 				}
 				return
 			}
 
-			s.restoring = false
 			s.detail.SetData(detail)
 			s.currentDetailActions = detail.Actions
 			s.activeContent = s.detail
 			s.setTitle(detail.Title)
 			s.renderHeaderHints()
 			s.renderBreadcrumbs()
+
+			if isInitial && !isRestore && res.Name() != "history" && s.historyRecorder != nil {
+				s.historyRecorder.Record(resource.HistoryEntry{
+					ResourceName: res.Name(),
+					Kind:         int(DetailKind),
+					SelectedID:   id,
+					Title:        detail.Title,
+					VisitedAt:    time.Now(),
+				})
+			}
 		})
 	}()
 }

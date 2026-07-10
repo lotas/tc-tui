@@ -3,6 +3,9 @@ package shell
 import (
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+
 	"github.com/taskcluster/tc-tui/resource"
 )
 
@@ -35,9 +38,9 @@ func TestTableViewSetDataRestoresSelectionByID(t *testing.T) {
 
 	row, _ := table.GetSelection()
 	cell := table.GetCell(row, 0)
-	id, ok := cell.GetReference().(string)
-	if !ok || id != "pool-b" {
-		t.Fatalf("expected selection to follow pool-b, got row %d (id=%q, ok=%v)", row, id, ok)
+	got, ok := cell.GetReference().(resource.Row)
+	if !ok || got.ID != "pool-b" {
+		t.Fatalf("expected selection to follow pool-b, got row %d (id=%q, ok=%v)", row, got.ID, ok)
 	}
 }
 
@@ -135,5 +138,56 @@ func TestTableViewSetDataShowsDescendingIndicator(t *testing.T) {
 	got := table.GetCell(0, 0).Text
 	if got != "CAPACITY ▼" {
 		t.Fatalf("expected descending indicator, got %q", got)
+	}
+}
+
+func TestTableViewSelectingRowWithNavTargetPassesItThrough(t *testing.T) {
+	table := NewTableView()
+
+	target := &resource.NavTarget{ResourceName: "workerpools", ID: "pool-a", Kind: resource.NavDetail}
+	columns := []resource.Column{{Title: "RESOURCE TYPE"}}
+	rows := []resource.Row{
+		{ID: "history-key-1", Cells: []string{"workerpools"}, NavTarget: target},
+	}
+	table.SetData(columns, rows, SortState{})
+
+	var got resource.Row
+	table.SetOnSelect(func(row resource.Row) {
+		got = row
+	})
+
+	table.Select(1, 0)
+	handler := table.InputHandler()
+	handler(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(p tview.Primitive) {})
+
+	if got.NavTarget != target {
+		t.Fatalf("expected onSelect to receive the row's NavTarget, got %+v", got.NavTarget)
+	}
+	if got.ID != "history-key-1" {
+		t.Fatalf("expected onSelect to receive the row's ID, got %q", got.ID)
+	}
+}
+
+func TestTableViewSelectingRowWithoutNavTargetLeavesItNil(t *testing.T) {
+	table := NewTableView()
+
+	columns := []resource.Column{{Title: "WORKER POOL ID"}}
+	rows := []resource.Row{{ID: "pool-a", Cells: []string{"pool-a"}}}
+	table.SetData(columns, rows, SortState{})
+
+	var got resource.Row
+	table.SetOnSelect(func(row resource.Row) {
+		got = row
+	})
+
+	table.Select(1, 0)
+	handler := table.InputHandler()
+	handler(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(p tview.Primitive) {})
+
+	if got.NavTarget != nil {
+		t.Fatalf("expected nil NavTarget for a normal row, got %+v", got.NavTarget)
+	}
+	if got.ID != "pool-a" {
+		t.Fatalf("expected onSelect to receive ID pool-a, got %q", got.ID)
 	}
 }

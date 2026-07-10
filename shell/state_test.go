@@ -2,6 +2,7 @@ package shell
 
 import (
 	"testing"
+	"time"
 
 	"github.com/taskcluster/tc-tui/resource"
 	"github.com/taskcluster/tc-tui/state"
@@ -54,5 +55,34 @@ func TestRestoreStateThenExportIsStable(t *testing.T) {
 		got.FacetByResource["roles"] != st.FacetByResource["roles"] ||
 		got.FilterByResource["roles"] != st.FilterByResource["roles"] {
 		t.Fatalf("ExportState after RestoreState = %+v, want %+v", got, st)
+	}
+}
+
+func TestExportRestoreStateRoundTripsHistory(t *testing.T) {
+	s := New(resource.NewRegistry())
+	rec := &fakeHistoryRecorder{}
+	s.historyRecorder = rec
+	rec.entries = []resource.HistoryEntry{
+		{
+			ResourceName: "workers", Kind: 1, SelectedID: "worker-1",
+			Title:     "Worker :: worker-1",
+			VisitedAt: time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC),
+		},
+	}
+
+	exported := s.ExportState()
+
+	restored := New(resource.NewRegistry())
+	restoredRec := &fakeHistoryRecorder{}
+	restored.historyRecorder = restoredRec
+
+	restored.RestoreState(exported)
+
+	got := restoredRec.Entries()
+	if len(got) != 1 || got[0].ResourceName != "workers" || got[0].SelectedID != "worker-1" || got[0].Title != "Worker :: worker-1" {
+		t.Fatalf("expected history to round-trip through Export/RestoreState, got %+v", got)
+	}
+	if got[0].Kind != 1 || got[0].Scope != "" || !got[0].VisitedAt.Equal(time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("expected Kind/Scope/VisitedAt to round-trip too, got %+v", got[0])
 	}
 }

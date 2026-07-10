@@ -82,7 +82,7 @@ func TestRenderListSetsUpClientFaceted(t *testing.T) {
 		options:      []string{"aws", "gcp"},
 	}
 
-	s.renderList(res, "")
+	s.renderList(res, "", false)
 
 	if s.currentFaceted == nil {
 		t.Fatalf("expected currentFaceted to be set")
@@ -102,7 +102,7 @@ func TestRenderListSetsUpServerFacetedWithDefaultTab(t *testing.T) {
 		options:      []string{"running", "stopped"},
 	}
 
-	s.renderList(res, "gcp/pool-a")
+	s.renderList(res, "gcp/pool-a", false)
 
 	if s.currentServerFaceted == nil {
 		t.Fatalf("expected currentServerFaceted to be set")
@@ -123,7 +123,7 @@ func TestRenderListRestoresRememberedFacetValue(t *testing.T) {
 		options:      []string{"running", "stopped"},
 	}
 
-	s.renderList(res, "gcp/pool-a")
+	s.renderList(res, "gcp/pool-a", false)
 
 	if s.currentFacetValue != "stopped" {
 		t.Fatalf("expected remembered facet value %q, got %q", "stopped", s.currentFacetValue)
@@ -138,7 +138,7 @@ func TestRenderListFallsBackToDefaultForStaleRememberedValue(t *testing.T) {
 		options:      []string{"running", "stopped"},
 	}
 
-	s.renderList(res, "gcp/pool-a")
+	s.renderList(res, "gcp/pool-a", false)
 
 	if s.currentFacetValue != "running" {
 		t.Fatalf("expected fallback to first option %q, got %q", "running", s.currentFacetValue)
@@ -150,7 +150,7 @@ func TestRenderListRestoresRememberedFilterQuery(t *testing.T) {
 	s.filterByResource["workerpools"] = "proj-task"
 	res := fakeResource{name: "workerpools"}
 
-	s.renderList(res, "")
+	s.renderList(res, "", false)
 
 	if s.filterQuery != "proj-task" {
 		t.Fatalf("expected remembered filter query %q, got %q", "proj-task", s.filterQuery)
@@ -161,7 +161,7 @@ func TestRenderListDefaultsToEmptyFilterQueryWhenNeverSet(t *testing.T) {
 	s := New(resource.NewRegistry())
 	res := fakeResource{name: "workerpools"}
 
-	s.renderList(res, "")
+	s.renderList(res, "", false)
 
 	if s.filterQuery != "" {
 		t.Fatalf("expected empty filter query, got %q", s.filterQuery)
@@ -277,7 +277,7 @@ func TestLoadListServesFromCacheWithoutFetching(t *testing.T) {
 		fetchedAt: time.Now(),
 	})
 
-	s.loadList(res, "pool-a", "running", true, false)
+	s.loadList(res, "pool-a", "running", true, false, false)
 
 	if len(s.lastRows) != 1 || s.lastRows[0].ID != "cached" {
 		t.Fatalf("expected cache-hit rows to be applied, got %+v", s.lastRows)
@@ -307,7 +307,7 @@ func TestLoadListForceRefreshBypassesCache(t *testing.T) {
 		fetchedAt: time.Now(),
 	})
 
-	s.loadList(res, "pool-a", "running", false, true)
+	s.loadList(res, "pool-a", "running", false, true, false)
 
 	waitFor(t, func() bool {
 		_, called := res.lastCall()
@@ -443,6 +443,122 @@ func TestGlobalInputCaptureDigitBeyondColumnCountIsNoOp(t *testing.T) {
 	}
 }
 
+// fakeHistoryRecorder is a minimal resource.HistoryRecorder for tests that
+// need to observe what Shell recorded, without going through the real
+// HistoryResource (whose own behavior is covered by resource/history_test.go).
+type fakeHistoryRecorder struct {
+	mu      sync.Mutex
+	entries []resource.HistoryEntry
+}
+
+func (f *fakeHistoryRecorder) Record(e resource.HistoryEntry) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.entries = append(f.entries, e)
+}
+
+func (f *fakeHistoryRecorder) Entries() []resource.HistoryEntry {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]resource.HistoryEntry(nil), f.entries...)
+}
+
+func (f *fakeHistoryRecorder) Restore(entries []resource.HistoryEntry) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.entries = entries
+}
+
+// fakeScopedTTLResource is a ScopedResource with a settable RefreshInterval,
+// needed to exercise loadList's cache-hit branch for a scoped (not
+// ServerFaceted) resource — fakeResource's RefreshInterval() is hardcoded to
+// 0, which the cache always treats as a miss (see cache.go's get).
+type fakeScopedTTLResource struct {
+	fakeResource
+	ttl time.Duration
+}
+
+func (f fakeScopedTTLResource) RefreshInterval() time.Duration                  { return f.ttl }
+func (f fakeScopedTTLResource) ScopedList(scope string) ([]resource.Row, error) { return nil, nil }
+func (f fakeScopedTTLResource) EmptyScopeResource() string                      { return "" }
+
+func TestLoadListRecordsScopedVisitOnSuccessfulCacheHit(t *testing.T) {
+	s := New(resource.NewRegistry())
+	rec := &fakeHistoryRecorder{}
+	s.historyRecorder = rec
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+
+	res := fakeScopedTTLResource{fakeResource: fakeResource{name: "workers"}, ttl: time.Minute}
+	s.cache.set(cacheKeyFor(res, "pool-a", ""), cacheEntry{
+		rows:      []resource.Row{{ID: "worker-1", Cells: []string{"worker-1"}}},
+		fetchedAt: time.Now(),
+	})
+
+	s.loadList(res, "pool-a", "", true, false, false)
+
+	entries := rec.Entries()
+	if len(entries) != 1 || entries[0].ResourceName != "workers" || entries[0].Scope != "pool-a" || entries[0].Kind != 0 {
+		t.Fatalf("expected one recorded scoped-list visit, got %+v", entries)
+	}
+}
+
+func TestLoadListDoesNotRecordUnscopedVisit(t *testing.T) {
+	s := New(resource.NewRegistry())
+	rec := &fakeHistoryRecorder{}
+	s.historyRecorder = rec
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+
+	res := fakeScopedTTLResource{fakeResource: fakeResource{name: "workerpools"}, ttl: time.Minute}
+	s.cache.set(cacheKeyFor(res, "", ""), cacheEntry{
+		rows:      []resource.Row{{ID: "pool-a", Cells: []string{"pool-a"}}},
+		fetchedAt: time.Now(),
+	})
+
+	s.loadList(res, "", "", true, false, false)
+
+	if len(rec.Entries()) != 0 {
+		t.Fatalf("expected no recorded visit for an unscoped list, got %+v", rec.Entries())
+	}
+}
+
+func TestLoadListDoesNotRecordDuringRestore(t *testing.T) {
+	s := New(resource.NewRegistry())
+	rec := &fakeHistoryRecorder{}
+	s.historyRecorder = rec
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+
+	res := fakeScopedTTLResource{fakeResource: fakeResource{name: "workers"}, ttl: time.Minute}
+	s.cache.set(cacheKeyFor(res, "pool-a", ""), cacheEntry{
+		rows:      []resource.Row{{ID: "worker-1", Cells: []string{"worker-1"}}},
+		fetchedAt: time.Now(),
+	})
+
+	s.loadList(res, "pool-a", "", true, false, true) // isRestore=true
+
+	if len(rec.Entries()) != 0 {
+		t.Fatalf("expected no recorded visit while isRestore=true, got %+v", rec.Entries())
+	}
+}
+
+func TestLoadListDoesNotRecordForHistoryResourceItself(t *testing.T) {
+	s := New(resource.NewRegistry())
+	rec := &fakeHistoryRecorder{}
+	s.historyRecorder = rec
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+
+	res := fakeScopedTTLResource{fakeResource: fakeResource{name: "history"}, ttl: time.Minute}
+	s.cache.set(cacheKeyFor(res, "pool-a", ""), cacheEntry{
+		rows:      []resource.Row{{ID: "x", Cells: []string{"x"}}},
+		fetchedAt: time.Now(),
+	})
+
+	s.loadList(res, "pool-a", "", true, false, false)
+
+	if len(rec.Entries()) != 0 {
+		t.Fatalf("expected no recorded visit for the history resource itself, got %+v", rec.Entries())
+	}
+}
+
 func TestSwitchResourceDirectLookupWithIDGoesStraightToDetail(t *testing.T) {
 	registry := resource.NewRegistry()
 	registry.Register(fakeDirectLookupResource{
@@ -485,9 +601,6 @@ func TestRenderRestoredTopFallsBackToRootWhenStackIsEmpty(t *testing.T) {
 
 	s.renderRestoredTop()
 
-	if s.restoring {
-		t.Fatalf("expected restoring to be false once falling back to root")
-	}
 	top, ok := s.stack.Top()
 	if !ok || top.ResourceName != "workerpools" || top.Kind != ListKind {
 		t.Fatalf("expected root view on top, got %+v (ok=%v)", top, ok)
@@ -503,15 +616,22 @@ func TestRenderRestoredTopDropsUnresolvableEntriesThenFallsBackToRoot(t *testing
 
 	s.renderRestoredTop()
 
-	if s.restoring {
-		t.Fatalf("expected restoring to be false once falling back to root")
-	}
 	top, ok := s.stack.Top()
 	if !ok || top.ResourceName != "workerpools" || top.Kind != ListKind {
 		t.Fatalf("expected root view on top after dropping the unresolvable entry, got %+v (ok=%v)", top, ok)
 	}
 }
 
+// TestRenderRestoredTopRendersResolvableTopView confirms a resolvable
+// restored view stays on top of the stack while its fetch is in flight. It
+// no longer asserts on an "isRestore" flag directly: isRestore is now a
+// plain function argument private to loadDetail's goroutine (see Task 4 of
+// the implementation plan / the design doc), not an externally observable
+// field — and the argument's effect (recording/pop-and-retry decisions)
+// lives entirely inside a QueueUpdateDraw callback, which never runs in
+// these tests since s.app.Run() is never called (see the waitFor helper's
+// comment above for the same, pre-existing limitation on the async
+// success/failure paths in general).
 func TestRenderRestoredTopRendersResolvableTopView(t *testing.T) {
 	registry := resource.NewRegistry()
 	registry.Register(fakeResource{name: "workerpools"})
@@ -521,11 +641,152 @@ func TestRenderRestoredTopRendersResolvableTopView(t *testing.T) {
 
 	s.renderRestoredTop()
 
-	if !s.restoring {
-		t.Fatalf("expected restoring to be true while the initial fetch is still pending")
-	}
 	top, ok := s.stack.Top()
 	if !ok || top.ResourceName != "workerpools" || top.Kind != DetailKind || top.SelectedID != "abc" {
 		t.Fatalf("expected the restored detail view to remain on top, got %+v (ok=%v)", top, ok)
+	}
+}
+
+func TestIsStaleLoadDetectsSupersededDispatchToIdenticalTarget(t *testing.T) {
+	s := New(resource.NewRegistry())
+
+	// Simulate two dispatches to the IDENTICAL target — e.g. a pending
+	// restore-replay for (task, "A") and a manual `:task A` navigation
+	// racing it, per the bug this guards against. Each dispatch increments
+	// loadGeneration and captures its own value, exactly as loadList/
+	// loadDetail do internally.
+	s.loadGeneration++
+	gen1 := s.loadGeneration // the older, soon-to-be-superseded dispatch
+
+	s.loadGeneration++
+	gen2 := s.loadGeneration // the newer dispatch, targeting the same View
+
+	if !s.isStaleLoad(gen1) {
+		t.Fatalf("expected the older dispatch (gen1=%d) to be stale once a newer one (gen2=%d) started", gen1, gen2)
+	}
+	if s.isStaleLoad(gen2) {
+		t.Fatalf("expected the newer dispatch (gen2=%d) to still be current", gen2)
+	}
+}
+
+func TestLoadDetailIncrementsGenerationOnEachNavigationDispatch(t *testing.T) {
+	s := New(resource.NewRegistry())
+	res := fakeResource{name: "task"}
+
+	before := s.loadGeneration
+	s.loadDetail(res, "A", true, true) // e.g. a restore-replay dispatch
+
+	if s.loadGeneration != before+1 {
+		t.Fatalf("expected loadGeneration to increment by 1, got %d -> %d", before, s.loadGeneration)
+	}
+	firstGen := s.loadGeneration
+
+	s.loadDetail(res, "A", true, false) // e.g. a manual re-navigation to the identical target
+
+	if s.loadGeneration != firstGen+1 {
+		t.Fatalf("expected loadGeneration to increment again, got %d -> %d", firstGen, s.loadGeneration)
+	}
+	// The first dispatch's captured generation (firstGen) is now stale,
+	// even though it targeted the exact same (resource, id) as the second —
+	// this is precisely the case isTopView's View-equality check cannot
+	// distinguish on its own.
+	if !s.isStaleLoad(firstGen) {
+		t.Fatalf("expected the first dispatch's generation to be stale after a second dispatch to the identical target")
+	}
+}
+
+func TestLoadListIncrementsGenerationOnEachNavigationDispatch(t *testing.T) {
+	s := New(resource.NewRegistry())
+	res := fakeResource{name: "workerpools"}
+
+	before := s.loadGeneration
+	s.loadList(res, "", "", true, false, true) // e.g. a restore-replay dispatch
+
+	if s.loadGeneration != before+1 {
+		t.Fatalf("expected loadGeneration to increment by 1, got %d -> %d", before, s.loadGeneration)
+	}
+	firstGen := s.loadGeneration
+
+	s.loadList(res, "", "", true, false, false) // e.g. a manual re-navigation to the identical target
+
+	if s.loadGeneration != firstGen+1 {
+		t.Fatalf("expected loadGeneration to increment again, got %d -> %d", firstGen, s.loadGeneration)
+	}
+	if !s.isStaleLoad(firstGen) {
+		t.Fatalf("expected the first dispatch's generation to be stale after a second dispatch to the identical target")
+	}
+}
+
+func TestLoadDetailBackgroundRefreshDoesNotBumpGeneration(t *testing.T) {
+	s := New(resource.NewRegistry())
+	res := fakeResource{name: "task"}
+
+	s.loadDetail(res, "A", true, false) // a genuine navigation dispatch (isInitial=true)
+	genAfterInitial := s.loadGeneration
+
+	s.loadDetail(res, "A", false, false) // a background refresh tick (isInitial=false) — must NOT bump generation
+
+	if s.loadGeneration != genAfterInitial {
+		t.Fatalf("expected a background refresh (isInitial=false) not to bump loadGeneration, got %d -> %d", genAfterInitial, s.loadGeneration)
+	}
+	// Critically: the initial dispatch's captured generation must still be
+	// considered current after the refresh tick, since nothing has
+	// actually superseded it as a navigation target.
+	if s.isStaleLoad(genAfterInitial) {
+		t.Fatalf("expected the initial dispatch's generation to remain current after a mere background refresh tick")
+	}
+}
+
+func TestLoadListBackgroundRefreshDoesNotBumpGeneration(t *testing.T) {
+	s := New(resource.NewRegistry())
+	res := fakeResource{name: "workerpools"}
+
+	s.loadList(res, "", "", true, false, false) // a genuine navigation dispatch (isInitial=true)
+	genAfterInitial := s.loadGeneration
+
+	s.loadList(res, "", "", false, true, false) // a background refresh tick (isInitial=false, forceRefresh=true, as Invalidate dispatches it)
+
+	if s.loadGeneration != genAfterInitial {
+		t.Fatalf("expected a background refresh (isInitial=false) not to bump loadGeneration, got %d -> %d", genAfterInitial, s.loadGeneration)
+	}
+	if s.isStaleLoad(genAfterInitial) {
+		t.Fatalf("expected the initial dispatch's generation to remain current after a mere background refresh tick")
+	}
+}
+
+func TestNextLoadGenerationInheritsForRefreshButBumpsForNavigation(t *testing.T) {
+	s := New(resource.NewRegistry())
+
+	gen1 := s.nextLoadGeneration(true) // initial navigation to A
+
+	genRefresh := s.nextLoadGeneration(false) // a same-target refresh tick
+	if genRefresh != gen1 {
+		t.Fatalf("expected a refresh dispatch to inherit the current generation (%d), got %d", gen1, genRefresh)
+	}
+
+	gen2 := s.nextLoadGeneration(true) // navigate away to B
+	gen3 := s.nextLoadGeneration(true) // navigate back to A — a fresh re-visit
+
+	if gen2 == gen1 || gen3 == gen2 {
+		t.Fatalf("expected each navigation dispatch to bump the generation, got gen1=%d gen2=%d gen3=%d", gen1, gen2, gen3)
+	}
+
+	// The old refresh's captured generation must now be stale relative to
+	// the fresh re-visit to A — even though isTopView would match again —
+	// since two navigation dispatches have incremented the generation since
+	// it was captured.
+	if !s.isStaleLoad(genRefresh) {
+		t.Fatalf("expected the old refresh's generation (%d) to be stale after two subsequent navigation dispatches (current %d)", genRefresh, s.loadGeneration)
+	}
+}
+
+func TestNextLoadGenerationRefreshRemainsCurrentWithoutInterveningNavigation(t *testing.T) {
+	s := New(resource.NewRegistry())
+
+	s.nextLoadGeneration(true)                // initial navigation to A
+	genRefresh := s.nextLoadGeneration(false) // a same-target refresh tick, nothing navigated away in between
+
+	if s.isStaleLoad(genRefresh) {
+		t.Fatalf("expected a refresh's captured generation to remain current when nothing has navigated away in the meantime")
 	}
 }

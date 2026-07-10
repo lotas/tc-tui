@@ -9,6 +9,14 @@ func (s *Shell) isTopView(view View) bool {
 	return ok && top == view
 }
 
+// isStaleLoad reports whether gen (a value captured at dispatch time) no
+// longer matches the shell's current loadGeneration — i.e. a newer
+// loadList/loadDetail dispatch has started since this one, so this
+// request's completion must no-op regardless of what isTopView would say.
+func (s *Shell) isStaleLoad(gen int) bool {
+	return gen != s.loadGeneration
+}
+
 // Invalidate re-fetches the given view if it is currently the topmost view,
 // and redraws. Called by the refresh ticker today; a future push-event
 // listener (e.g. Pulse) could call this directly instead of on a timer,
@@ -25,9 +33,9 @@ func (s *Shell) Invalidate(view View) {
 
 	switch view.Kind {
 	case ListKind:
-		s.loadList(res, view.Scope, s.currentFacetValue, false, true)
+		s.loadList(res, view.Scope, s.currentFacetValue, false, true, false)
 	case DetailKind:
-		s.loadDetail(res, view.SelectedID, false)
+		s.loadDetail(res, view.SelectedID, false, false)
 	}
 }
 
