@@ -19,15 +19,31 @@ type fakeTaskcluster struct {
 	workerPool     *tcworkermanager.WorkerPoolFullDefinition
 	workerPoolErr  error
 
-	workers      taskcluster.WorkerList
-	workersErr   error
-	workersState string // last `state` param GetWorkersForWorkerPool was called with
+	workers               taskcluster.WorkerList
+	workersErr            error
+	workersState          string // last `state` param GetWorkersForWorkerPool was called with
+	workersLaunchConfigID string // last `launchConfigId` param GetWorkersForWorkerPool was called with
 
-	stateCounts    map[string]int
-	stateCountsErr error
+	stateCounts               map[string]int
+	stateCountsErr            error
+	stateCountsLaunchConfigID string // last `launchConfigId` param GetWorkerPoolStateCounts was called with
 
 	worker    *tcworkermanager.WorkerFullDefinition
 	workerErr error
+
+	launchConfigs                taskcluster.WorkerPoolLaunchConfigList
+	launchConfigsErr             error
+	launchConfigsIncludeArchived bool // last `includeArchived` param GetWorkerPoolLaunchConfigs was called with
+
+	workerPoolErrors               taskcluster.WorkerPoolErrorList
+	workerPoolErrorsErr            error
+	workerPoolErrorsLaunchConfigID string // last `launchConfigId` param GetWorkerPoolErrors was called with
+
+	workerPoolError    *tcworkermanager.WorkerPoolError
+	workerPoolErrorErr error
+
+	errorCount    int
+	errorCountErr error
 
 	task    *tcqueue.TaskDefinitionResponse
 	taskErr error
@@ -69,17 +85,37 @@ func (f *fakeTaskcluster) GetWorkerPool(workerPoolID string) (*tcworkermanager.W
 	return f.workerPool, f.workerPoolErr
 }
 
-func (f *fakeTaskcluster) GetWorkersForWorkerPool(workerPoolID, state string) (taskcluster.WorkerList, error) {
+func (f *fakeTaskcluster) GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (taskcluster.WorkerList, error) {
 	f.workersState = state
+	f.workersLaunchConfigID = launchConfigID
 	return f.workers, f.workersErr
 }
 
-func (f *fakeTaskcluster) GetWorkerPoolStateCounts(workerPoolID string) (map[string]int, error) {
+func (f *fakeTaskcluster) GetWorkerPoolStateCounts(workerPoolID, launchConfigID string) (map[string]int, error) {
+	f.stateCountsLaunchConfigID = launchConfigID
 	return f.stateCounts, f.stateCountsErr
 }
 
 func (f *fakeTaskcluster) GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error) {
 	return f.worker, f.workerErr
+}
+
+func (f *fakeTaskcluster) GetWorkerPoolLaunchConfigs(workerPoolID string, includeArchived bool) (taskcluster.WorkerPoolLaunchConfigList, error) {
+	f.launchConfigsIncludeArchived = includeArchived
+	return f.launchConfigs, f.launchConfigsErr
+}
+
+func (f *fakeTaskcluster) GetWorkerPoolErrors(workerPoolID, launchConfigID string) (taskcluster.WorkerPoolErrorList, error) {
+	f.workerPoolErrorsLaunchConfigID = launchConfigID
+	return f.workerPoolErrors, f.workerPoolErrorsErr
+}
+
+func (f *fakeTaskcluster) GetWorkerPoolError(workerPoolID, errorID string) (*tcworkermanager.WorkerPoolError, error) {
+	return f.workerPoolError, f.workerPoolErrorErr
+}
+
+func (f *fakeTaskcluster) GetWorkerPoolErrorCount(workerPoolID string) (int, error) {
+	return f.errorCount, f.errorCountErr
 }
 
 func (f *fakeTaskcluster) GetTask(taskID string) (*tcqueue.TaskDefinitionResponse, error) {

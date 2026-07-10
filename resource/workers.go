@@ -8,12 +8,12 @@ import (
 	"github.com/taskcluster/tc-tui/taskcluster"
 )
 
-// workerIDSeparator is safe only because worker-manager's API schema
-// disallows ':' in workerPoolId, workerGroup, and workerId
+// idSeparator is safe only because worker-manager's API schema disallows ':'
+// in workerPoolId, workerGroup, workerId, launchConfigId, and errorId
 // (^[a-zA-Z0-9-_]*$ / ^[a-zA-Z0-9-_]{1,38}/[a-z]([-a-z0-9]{0,36}[a-z0-9])?$) —
-// composeWorkerID/parseWorkerID's round trip depends on that external
+// every compose/parse round trip in this package depends on that external
 // guarantee, not on any validation performed here.
-const workerIDSeparator = "::"
+const idSeparator = "::"
 
 type WorkersResource struct {
 	tc taskcluster.Taskcluster
@@ -52,9 +52,12 @@ func (r *WorkersResource) FacetOptions() []string {
 
 // FacetList fetches only the workers in the given state — never an
 // unfiltered/combined list, since a single pool can have tens of thousands
-// of stopped workers.
-func (r *WorkersResource) FacetList(workerPoolID, state string) ([]Row, error) {
-	workers, err := r.tc.GetWorkersForWorkerPool(workerPoolID, state)
+// of stopped workers. scope is either a bare workerPoolId (pool-wide) or a
+// workerPoolId::launchConfigId compound (narrowed to one launch config, e.g.
+// when reached from a Launch Config's Detail view).
+func (r *WorkersResource) FacetList(scope, state string) ([]Row, error) {
+	workerPoolID, launchConfigID := parseScope(scope)
+	workers, err := r.tc.GetWorkersForWorkerPool(workerPoolID, launchConfigID, state)
 	if err != nil {
 		return nil, err
 	}
@@ -63,9 +66,11 @@ func (r *WorkersResource) FacetList(workerPoolID, state string) ([]Row, error) {
 }
 
 // FacetCounts returns worker counts by state without fetching any worker
-// rows, via worker-manager's per-pool stats endpoint.
-func (r *WorkersResource) FacetCounts(workerPoolID string) (map[string]int, error) {
-	return r.tc.GetWorkerPoolStateCounts(workerPoolID)
+// rows, via worker-manager's per-pool stats endpoint. See FacetList for the
+// scope format.
+func (r *WorkersResource) FacetCounts(scope string) (map[string]int, error) {
+	workerPoolID, launchConfigID := parseScope(scope)
+	return r.tc.GetWorkerPoolStateCounts(workerPoolID, launchConfigID)
 }
 
 // ScopedList exists only so WorkersResource still satisfies ScopedResource
@@ -143,14 +148,31 @@ func (r *WorkersResource) RefreshInterval() time.Duration {
 }
 
 func composeWorkerID(workerPoolID, workerGroup, workerID string) string {
-	return strings.Join([]string{workerPoolID, workerGroup, workerID}, workerIDSeparator)
+	return strings.Join([]string{workerPoolID, workerGroup, workerID}, idSeparator)
 }
 
 func parseWorkerID(id string) (workerPoolID, workerGroup, workerID string, err error) {
-	parts := strings.Split(id, workerIDSeparator)
+	parts := strings.Split(id, idSeparator)
 	if len(parts) != 3 {
 		return "", "", "", fmt.Errorf("invalid worker id %q", id)
 	}
 
 	return parts[0], parts[1], parts[2], nil
+}
+
+// composeScope joins a worker pool ID with a secondary component (a launch
+// config ID, an error ID, ...) into the compound string used for both scoped
+// navigation targets and list row IDs across this package.
+func composeScope(workerPoolID, secondary string) string {
+	return strings.Join([]string{workerPoolID, secondary}, idSeparator)
+}
+
+// parseScope splits a compound scope/ID back into its worker pool ID and
+// secondary component. If no separator is present, secondary is "".
+func parseScope(scope string) (workerPoolID, secondary string) {
+	parts := strings.SplitN(scope, idSeparator, 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return scope, ""
 }

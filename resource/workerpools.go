@@ -101,6 +101,16 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 		pool.Config,
 	)
 
+	// Best-effort summary lines: a failure in either just omits that line
+	// rather than failing the whole Detail fetch, since these are
+	// supplementary to the pool data already rendered above.
+	if total, active, err := launchConfigCounts(r.tc, id); err == nil {
+		body += fmt.Sprintf("[green]Launch configs:[blue] %d[white] (%d archived)\n", total, total-active)
+	}
+	if count, err := r.tc.GetWorkerPoolErrorCount(id); err == nil {
+		body += fmt.Sprintf("[green]Errors (last 7d):[blue] %d[white]\n", count)
+	}
+
 	return Detail{
 		Title: fmt.Sprintf("Worker Pool :: %s", pool.WorkerPoolID),
 		Body:  body,
@@ -128,6 +138,24 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 				Label: "claimed",
 				Target: NavTarget{
 					ResourceName: "claimed",
+					ID:           pool.WorkerPoolID,
+					Kind:         NavScopedList,
+				},
+			},
+			{
+				Key:   'l',
+				Label: "launchconfigs",
+				Target: NavTarget{
+					ResourceName: "launchconfigs",
+					ID:           pool.WorkerPoolID,
+					Kind:         NavScopedList,
+				},
+			},
+			{
+				Key:   'e',
+				Label: "errors",
+				Target: NavTarget{
+					ResourceName: "errors",
 					ID:           pool.WorkerPoolID,
 					Kind:         NavScopedList,
 				},

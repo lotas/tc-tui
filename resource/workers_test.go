@@ -232,3 +232,62 @@ func TestParseWorkerIDRejectsMalformedInput(t *testing.T) {
 		t.Fatalf("expected an error for an id with too many parts")
 	}
 }
+
+func TestWorkersResourceFacetListWithLaunchConfigScope(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workers: taskcluster.WorkerList{
+			{WorkerPoolID: "gcp/pool-a", WorkerGroup: "us-west1", WorkerID: "i-1234", State: "running", Capacity: 1},
+		},
+	}
+	res := NewWorkersResource(fake)
+
+	if _, err := res.FacetList("gcp/pool-a::lc-1", "running"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.workersLaunchConfigID != "lc-1" {
+		t.Fatalf("expected launch config filter %q, got %q", "lc-1", fake.workersLaunchConfigID)
+	}
+}
+
+func TestWorkersResourceFacetListWithoutLaunchConfigScope(t *testing.T) {
+	fake := &fakeTaskcluster{workers: taskcluster.WorkerList{}}
+	res := NewWorkersResource(fake)
+
+	if _, err := res.FacetList("gcp/pool-a", "running"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.workersLaunchConfigID != "" {
+		t.Fatalf("expected no launch config filter, got %q", fake.workersLaunchConfigID)
+	}
+}
+
+func TestWorkersResourceFacetCountsWithLaunchConfigScope(t *testing.T) {
+	fake := &fakeTaskcluster{stateCounts: map[string]int{"running": 1}}
+	res := NewWorkersResource(fake)
+
+	if _, err := res.FacetCounts("gcp/pool-a::lc-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.stateCountsLaunchConfigID != "lc-1" {
+		t.Fatalf("expected launch config filter %q, got %q", "lc-1", fake.stateCountsLaunchConfigID)
+	}
+}
+
+func TestComposeAndParseScope(t *testing.T) {
+	scope := composeScope("gcp/pool-a", "lc-1")
+	if scope != "gcp/pool-a::lc-1" {
+		t.Fatalf("unexpected scope: %s", scope)
+	}
+
+	workerPoolID, secondary := parseScope(scope)
+	if workerPoolID != "gcp/pool-a" || secondary != "lc-1" {
+		t.Fatalf("unexpected round trip: %q %q", workerPoolID, secondary)
+	}
+}
+
+func TestParseScopeWithNoSeparator(t *testing.T) {
+	workerPoolID, secondary := parseScope("gcp/pool-a")
+	if workerPoolID != "gcp/pool-a" || secondary != "" {
+		t.Fatalf("unexpected result: %q %q", workerPoolID, secondary)
+	}
+}

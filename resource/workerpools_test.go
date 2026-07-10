@@ -66,6 +66,11 @@ func TestWorkerPoolsResourceDescribe(t *testing.T) {
 			RunningCount:      3,
 			StoppedCount:      1,
 		},
+		launchConfigs: taskcluster.WorkerPoolLaunchConfigList{
+			{LaunchConfigID: "lc-1", IsArchived: false},
+			{LaunchConfigID: "lc-2", IsArchived: true},
+		},
+		errorCount: 4,
 	}
 	res := NewWorkerPoolsResource(fake)
 
@@ -76,8 +81,8 @@ func TestWorkerPoolsResourceDescribe(t *testing.T) {
 	if detail.Title != "Worker Pool :: proj/pool-a" {
 		t.Fatalf("unexpected title: %s", detail.Title)
 	}
-	if len(detail.Actions) != 3 {
-		t.Fatalf("expected 3 actions, got %d", len(detail.Actions))
+	if len(detail.Actions) != 5 {
+		t.Fatalf("expected 5 actions, got %d", len(detail.Actions))
 	}
 	if a := detail.Actions[0]; a.Key != 'w' || a.Target.ResourceName != "workers" ||
 		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
@@ -91,7 +96,64 @@ func TestWorkerPoolsResourceDescribe(t *testing.T) {
 		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
 		t.Fatalf("unexpected action[2]: %+v", a)
 	}
+	if a := detail.Actions[3]; a.Key != 'l' || a.Target.ResourceName != "launchconfigs" ||
+		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action[3]: %+v", a)
+	}
+	if a := detail.Actions[4]; a.Key != 'e' || a.Target.ResourceName != "errors" ||
+		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action[4]: %+v", a)
+	}
 	if !strings.Contains(detail.Body, "a pool") || !strings.Contains(detail.Body, "owner@example.com") {
+		t.Fatalf("unexpected body: %s", detail.Body)
+	}
+	if !strings.Contains(detail.Body, "Launch configs:[blue] 2[white] (1 archived)") {
+		t.Fatalf("unexpected body: %s", detail.Body)
+	}
+	if !strings.Contains(detail.Body, "Errors (last 7d):[blue] 4[white]") {
+		t.Fatalf("unexpected body: %s", detail.Body)
+	}
+}
+
+func TestWorkerPoolsResourceDescribeOmitsSummaryLinesOnError(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workerPool: &tcworkermanager.WorkerPoolFullDefinition{
+			WorkerPoolID: "proj/pool-a",
+			Description:  "a pool",
+		},
+		launchConfigsErr: errors.New("boom"),
+		errorCountErr:    errors.New("boom"),
+	}
+	res := NewWorkerPoolsResource(fake)
+
+	detail, err := res.Describe("proj/pool-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(detail.Body, "Launch configs:") || strings.Contains(detail.Body, "Errors (last 7d):") {
+		t.Fatalf("expected summary lines to be omitted on error, got body: %s", detail.Body)
+	}
+}
+
+func TestWorkerPoolsResourceDescribePartialSummaryFailure(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workerPool: &tcworkermanager.WorkerPoolFullDefinition{
+			WorkerPoolID: "proj/pool-a",
+			Description:  "a pool",
+		},
+		launchConfigsErr: errors.New("boom"),
+		errorCount:       7,
+	}
+	res := NewWorkerPoolsResource(fake)
+
+	detail, err := res.Describe("proj/pool-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(detail.Body, "Launch configs:") {
+		t.Fatalf("expected launch configs summary line to be omitted, got body: %s", detail.Body)
+	}
+	if !strings.Contains(detail.Body, "Errors (last 7d):[blue] 7[white]") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}
 }

@@ -171,7 +171,7 @@ func TestBuildHelpTextFlagsServerFacetedResourceWithItsOptions(t *testing.T) {
 
 	text := buildHelpText(registry)
 
-	for _, want := range []string{"tabs by state", "running", "stopped"} {
+	for _, want := range []string{"tabs:", "running", "stopped"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("buildHelpText() missing %q\ngot:\n%s", want, text)
 		}

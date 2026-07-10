@@ -85,7 +85,7 @@ func buildHelpText(registry *resource.Registry) string {
 		switch faceted := res.(type) {
 		case resource.ServerFaceted:
 			b.WriteString(fmt.Sprintf(
-				"      tabs by state: %s\n", strings.Join(faceted.FacetOptions(), ", "),
+				"      tabs: %s\n", strings.Join(faceted.FacetOptions(), ", "),
 			))
 		case resource.Faceted:
 			b.WriteString("      tabs by provider\n")

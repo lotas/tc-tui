@@ -2,6 +2,7 @@ package taskcluster
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 
@@ -15,9 +16,11 @@ const PageSize = "150"
 type RolesList []tcauth.GetRoleResponse
 type WorkerPoolList []tcworkermanager.WorkerPoolFullDefinition
 type WorkerList []tcworkermanager.WorkerFullDefinition
-type TaskGroupTaskList []tcqueue.TaskDefinitionAndStatus // ListTaskGroup's members
-type PendingTaskList []tcqueue.Var3                      // ListPendingTasks' members
-type ClaimedTaskList []tcqueue.Var4                      // ListClaimedTasks' members
+type TaskGroupTaskList []tcqueue.TaskDefinitionAndStatus   // ListTaskGroup's members
+type PendingTaskList []tcqueue.Var3                        // ListPendingTasks' members
+type ClaimedTaskList []tcqueue.Var4                        // ListClaimedTasks' members
+type WorkerPoolLaunchConfigList []tcworkermanager.Var1     // ListWorkerPoolLaunchConfigs' members
+type WorkerPoolErrorList []tcworkermanager.WorkerPoolError // ListWorkerPoolErrors' members
 
 type Taskcluster interface {
 	GetVersion() Version
@@ -30,9 +33,13 @@ type Taskcluster interface {
 	GetRole(roleID string) (*tcauth.GetRoleResponse, error)
 	GetWorkerPools() (WorkerPoolList, error)
 	GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error)
-	GetWorkersForWorkerPool(workerPoolID, state string) (WorkerList, error)
-	GetWorkerPoolStateCounts(workerPoolID string) (map[string]int, error)
+	GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (WorkerList, error)
+	GetWorkerPoolStateCounts(workerPoolID, launchConfigID string) (map[string]int, error)
 	GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error)
+	GetWorkerPoolLaunchConfigs(workerPoolID string, includeArchived bool) (WorkerPoolLaunchConfigList, error)
+	GetWorkerPoolErrors(workerPoolID, launchConfigID string) (WorkerPoolErrorList, error)
+	GetWorkerPoolError(workerPoolID, errorID string) (*tcworkermanager.WorkerPoolError, error)
+	GetWorkerPoolErrorCount(workerPoolID string) (int, error)
 
 	GetTask(taskID string) (*tcqueue.TaskDefinitionResponse, error)
 	GetTaskStatus(taskID string) (*tcqueue.TaskStatusStructure, error)
@@ -168,9 +175,9 @@ func (tc *TC) GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFul
 	return tc.wm.WorkerPool(workerPoolID)
 }
 
-func (tc *TC) GetWorkersForWorkerPool(workerPoolID, state string) (WorkerList, error) {
+func (tc *TC) GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (WorkerList, error) {
 	workers, err := paginate(func(cont string) ([]tcworkermanager.WorkerFullDefinition, string, error) {
-		resp, err := tc.wm.ListWorkersForWorkerPool(workerPoolID, cont, "" /* launchConfigId */, PageSize, state)
+		resp, err := tc.wm.ListWorkersForWorkerPool(workerPoolID, cont, launchConfigID, PageSize, state)
 		if err != nil {
 			return nil, "", err
 		}
@@ -183,10 +190,12 @@ func (tc *TC) GetWorkersForWorkerPool(workerPoolID, state string) (WorkerList, e
 	return WorkerList(workers), nil
 }
 
-// GetWorkerPoolStateCounts returns worker counts by state for one pool,
-// summed across its launch configurations. It calls the lightweight
-// worker-pool stats endpoint — no individual worker rows are fetched.
-func (tc *TC) GetWorkerPoolStateCounts(workerPoolID string) (map[string]int, error) {
+// GetWorkerPoolStateCounts returns worker counts by state for one pool. With
+// launchConfigID empty, counts are summed across every launch configuration;
+// otherwise only the matching launch configuration's counts are returned. It
+// calls the lightweight worker-pool stats endpoint — no individual worker
+// rows are fetched either way.
+func (tc *TC) GetWorkerPoolStateCounts(workerPoolID, launchConfigID string) (map[string]int, error) {
 	stats, err := tc.wm.WorkerPoolStats(workerPoolID)
 	if err != nil {
 		return nil, err
@@ -194,6 +203,9 @@ func (tc *TC) GetWorkerPoolStateCounts(workerPoolID string) (map[string]int, err
 
 	counts := map[string]int{"requested": 0, "running": 0, "stopping": 0, "stopped": 0}
 	for _, lc := range stats.LaunchConfigStats {
+		if launchConfigID != "" && lc.LaunchConfigID != launchConfigID {
+			continue
+		}
 		counts["requested"] += int(lc.RequestedCount)
 		counts["running"] += int(lc.RunningCount)
 		counts["stopping"] += int(lc.StoppingCount)
@@ -205,6 +217,74 @@ func (tc *TC) GetWorkerPoolStateCounts(workerPoolID string) (map[string]int, err
 
 func (tc *TC) GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error) {
 	return tc.wm.Worker(workerPoolID, workerGroup, workerID)
+}
+
+// GetWorkerPoolLaunchConfigs lists a worker pool's launch configurations.
+// With includeArchived false, only active (non-archived) configs are
+// returned — matches the API's own default.
+func (tc *TC) GetWorkerPoolLaunchConfigs(workerPoolID string, includeArchived bool) (WorkerPoolLaunchConfigList, error) {
+	archived := "false"
+	if includeArchived {
+		archived = "true"
+	}
+
+	configs, err := paginate(func(cont string) ([]tcworkermanager.Var1, string, error) {
+		resp, err := tc.wm.ListWorkerPoolLaunchConfigs(workerPoolID, cont, archived, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.WorkerPoolLaunchConfigs, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return WorkerPoolLaunchConfigList(configs), nil
+}
+
+// GetWorkerPoolErrors lists provisioning errors reported for a worker pool.
+// With launchConfigID empty, every launch configuration's errors are
+// returned; otherwise only errors reported against that launch configuration.
+func (tc *TC) GetWorkerPoolErrors(workerPoolID, launchConfigID string) (WorkerPoolErrorList, error) {
+	errs, err := paginate(func(cont string) ([]tcworkermanager.WorkerPoolError, string, error) {
+		resp, err := tc.wm.ListWorkerPoolErrors(workerPoolID, cont, "" /* errorId */, launchConfigID, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.WorkerPoolErrors, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return WorkerPoolErrorList(errs), nil
+}
+
+// GetWorkerPoolError fetches a single worker pool error by ID, using the
+// API's own errorId filter rather than listing and searching client-side.
+func (tc *TC) GetWorkerPoolError(workerPoolID, errorID string) (*tcworkermanager.WorkerPoolError, error) {
+	resp, err := tc.wm.ListWorkerPoolErrors(workerPoolID, "", errorID, "", "1")
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.WorkerPoolErrors) == 0 {
+		return nil, fmt.Errorf("worker pool error %q not found in worker pool %q", errorID, workerPoolID)
+	}
+
+	return &resp.WorkerPoolErrors[0], nil
+}
+
+// GetWorkerPoolErrorCount returns the total number of provisioning errors
+// reported for a worker pool over worker-manager's fixed lookback window
+// (roughly the last 7 days), via the dedicated stats endpoint — no error
+// rows are fetched.
+func (tc *TC) GetWorkerPoolErrorCount(workerPoolID string) (int, error) {
+	stats, err := tc.wm.WorkerPoolErrorStats(workerPoolID)
+	if err != nil {
+		return 0, err
+	}
+
+	return int(stats.Totals.Total), nil
 }
 
 func (tc *TC) GetTask(taskID string) (*tcqueue.TaskDefinitionResponse, error) {
