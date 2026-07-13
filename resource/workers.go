@@ -103,6 +103,13 @@ func (r *WorkersResource) EmptyScopeResource() string {
 	return "workerpools"
 }
 
+// ScopeActions returns the worker-pool sibling jump keys (minus "workers"
+// itself) for scope — see resource.ScopeActions.
+func (r *WorkersResource) ScopeActions(scope string) []DetailAction {
+	workerPoolID, _ := parseScope(scope)
+	return workerPoolActions(workerPoolID, r.Name())
+}
+
 func (r *WorkersResource) Describe(id string) (Detail, error) {
 	workerPoolID, workerGroup, workerID, err := parseWorkerID(id)
 	if err != nil {
@@ -137,9 +144,24 @@ func (r *WorkersResource) Describe(id string) (Detail, error) {
 		worker.Expires,
 	)
 
+	// A failure here (e.g. the caller lacks queue:get-worker) must render as
+	// visibly "unavailable" rather than being silently indistinguishable from
+	// a worker with genuinely zero recent tasks.
+	switch tasks, err := r.tc.GetWorkerRecentTasks(workerPoolID, workerGroup, workerID); {
+	case err != nil:
+		body += fmt.Sprintf("\n[green]Recent Tasks:[white] [red]unavailable (%s)[white]\n", err)
+	case len(tasks) > 0:
+		var b strings.Builder
+		for _, t := range tasks {
+			b.WriteString(fmt.Sprintf("  %s (run %d)\n", t.TaskID, t.RunID))
+		}
+		body += fmt.Sprintf("\n[green]Recent Tasks (%d):[white]\n%s", len(tasks), b.String())
+	}
+
 	return Detail{
-		Title: fmt.Sprintf("Worker :: %s", worker.WorkerID),
-		Body:  body,
+		Title:   fmt.Sprintf("Worker :: %s", worker.WorkerID),
+		Body:    body,
+		Actions: workerPoolActions(workerPoolID, r.Name()),
 	}, nil
 }
 

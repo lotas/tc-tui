@@ -1,12 +1,29 @@
 package resource
 
 import (
+	"regexp"
+
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcworkermanager"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
 )
+
+// regionTagRe matches tview's `[tag]` region/color markup (e.g. "[green]",
+// "[#dddddd:]", "[-:-:-]").
+var regionTagRe = regexp.MustCompile(`\[[^][]*\]`)
+
+// stripRegionTags removes tview region/color tags from s. Markdown-rendered
+// body text (see renderMarkdown/renderGlamour in render.go) can interleave
+// style tags mid-phrase — e.g. glamour periodically re-asserts the same
+// color with no visible effect — which breaks naive multi-word
+// strings.Contains checks against the raw body. Tests that need to assert on
+// rendered prose should strip tags first rather than relying on markup-free
+// contiguous substrings.
+func stripRegionTags(s string) string {
+	return regionTagRe.ReplaceAllString(s, "")
+}
 
 type fakeTaskcluster struct {
 	roles    taskcluster.RolesList
@@ -30,6 +47,9 @@ type fakeTaskcluster struct {
 
 	worker    *tcworkermanager.WorkerFullDefinition
 	workerErr error
+
+	workerRecentTasks    []tcqueue.TaskRun
+	workerRecentTasksErr error
 
 	launchConfigs                taskcluster.WorkerPoolLaunchConfigList
 	launchConfigsErr             error
@@ -98,6 +118,10 @@ func (f *fakeTaskcluster) GetWorkerPoolStateCounts(workerPoolID, launchConfigID 
 
 func (f *fakeTaskcluster) GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error) {
 	return f.worker, f.workerErr
+}
+
+func (f *fakeTaskcluster) GetWorkerRecentTasks(workerPoolID, workerGroup, workerID string) ([]tcqueue.TaskRun, error) {
+	return f.workerRecentTasks, f.workerRecentTasksErr
 }
 
 func (f *fakeTaskcluster) GetWorkerPoolLaunchConfigs(workerPoolID string, includeArchived bool) (taskcluster.WorkerPoolLaunchConfigList, error) {

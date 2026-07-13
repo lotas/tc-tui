@@ -118,17 +118,17 @@ func (s *Shell) renderRestoredTop() {
 	}
 }
 
-// goBack pops the top view and re-renders the new top, or quits if the
-// stack is now empty.
+// goBack pops the top view and re-renders the new top. Esc never quits —
+// only q does — so this is a no-op once only the root view is left.
 func (s *Shell) goBack() {
-	if _, ok := s.stack.Pop(); !ok {
-		s.Stop()
+	if s.stack.Len() <= 1 {
 		return
 	}
 
+	s.stack.Pop()
+
 	top, ok := s.stack.Top()
 	if !ok {
-		s.Stop()
 		return
 	}
 
@@ -294,6 +294,9 @@ func (s *Shell) renderTabsBar(rows []resource.Row) {
 
 func (s *Shell) renderList(res resource.Resource, scope string, isRestore bool) {
 	s.currentDetailActions = nil
+	if sa, ok := res.(resource.ScopeActions); ok {
+		s.currentDetailActions = sa.ScopeActions(scope)
+	}
 	s.closeFooterInput()
 	s.filterQuery = s.filterByResource[res.Name()] // "" if never set
 	s.currentListResource = res.Name()

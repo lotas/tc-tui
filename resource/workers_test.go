@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tcclient "github.com/taskcluster/taskcluster/v101/clients/client-go"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcworkermanager"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
@@ -179,6 +180,72 @@ func TestWorkersResourceDescribe(t *testing.T) {
 	if !strings.Contains(detail.Body, "running") || !strings.Contains(detail.Body, "lc-1") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}
+	if len(detail.Actions) != 4 {
+		t.Fatalf("expected 4 sibling actions, got %d: %+v", len(detail.Actions), detail.Actions)
+	}
+}
+
+func TestWorkersResourceDescribeIncludesRecentTasks(t *testing.T) {
+	fake := &fakeTaskcluster{
+		worker: &tcworkermanager.WorkerFullDefinition{
+			WorkerPoolID: "gcp/pool-a",
+			WorkerGroup:  "us-west1",
+			WorkerID:     "i-1234",
+		},
+		workerRecentTasks: []tcqueue.TaskRun{
+			{TaskID: "task-1", RunID: 0},
+			{TaskID: "task-2", RunID: 1},
+		},
+	}
+	res := NewWorkersResource(fake)
+
+	detail, err := res.Describe("gcp/pool-a::us-west1::i-1234")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(detail.Body, "Recent Tasks (2):") || !strings.Contains(detail.Body, "task-1 (run 0)") {
+		t.Fatalf("unexpected body: %s", detail.Body)
+	}
+}
+
+func TestWorkersResourceDescribeShowsRecentTasksUnavailableOnError(t *testing.T) {
+	fake := &fakeTaskcluster{
+		worker: &tcworkermanager.WorkerFullDefinition{
+			WorkerPoolID: "gcp/pool-a",
+			WorkerGroup:  "us-west1",
+			WorkerID:     "i-1234",
+		},
+		workerRecentTasksErr: errors.New("boom"),
+	}
+	res := NewWorkersResource(fake)
+
+	detail, err := res.Describe("gcp/pool-a::us-west1::i-1234")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(detail.Body, "Recent Tasks:") || !strings.Contains(detail.Body, "unavailable") ||
+		!strings.Contains(detail.Body, "boom") {
+		t.Fatalf("expected an unavailable recent-tasks section naming the error, got body: %s", detail.Body)
+	}
+}
+
+func TestWorkersResourceDescribeOmitsRecentTasksSectionWhenGenuinelyEmpty(t *testing.T) {
+	fake := &fakeTaskcluster{
+		worker: &tcworkermanager.WorkerFullDefinition{
+			WorkerPoolID: "gcp/pool-a",
+			WorkerGroup:  "us-west1",
+			WorkerID:     "i-1234",
+		},
+	}
+	res := NewWorkersResource(fake)
+
+	detail, err := res.Describe("gcp/pool-a::us-west1::i-1234")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(detail.Body, "Recent Tasks") {
+		t.Fatalf("expected no recent-tasks section when there's no error and no tasks, got body: %s", detail.Body)
+	}
 }
 
 func TestWorkersResourceDescribeError(t *testing.T) {
@@ -289,5 +356,33 @@ func TestParseScopeWithNoSeparator(t *testing.T) {
 	workerPoolID, secondary := parseScope("gcp/pool-a")
 	if workerPoolID != "gcp/pool-a" || secondary != "" {
 		t.Fatalf("unexpected result: %q %q", workerPoolID, secondary)
+	}
+}
+
+func TestWorkersResourceScopeActionsExcludesWorkers(t *testing.T) {
+	res := NewWorkersResource(&fakeTaskcluster{})
+
+	actions := res.ScopeActions("gcp/pool-a")
+	if len(actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d: %+v", len(actions), actions)
+	}
+	for _, a := range actions {
+		if a.Target.ResourceName == "workers" {
+			t.Fatalf("expected \"workers\" excluded from its own sibling actions, got %+v", actions)
+		}
+		if a.Target.ID != "gcp/pool-a" {
+			t.Fatalf("expected actions scoped pool-wide to %q, got %+v", "gcp/pool-a", a)
+		}
+	}
+}
+
+func TestWorkersResourceScopeActionsWithLaunchConfigScope(t *testing.T) {
+	res := NewWorkersResource(&fakeTaskcluster{})
+
+	actions := res.ScopeActions("gcp/pool-a::lc-1")
+	for _, a := range actions {
+		if a.Target.ID != "gcp/pool-a" {
+			t.Fatalf("expected actions scoped to the bare pool id %q even from a launch-config-scoped list, got %+v", "gcp/pool-a", a)
+		}
 	}
 }

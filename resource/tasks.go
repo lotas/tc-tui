@@ -56,6 +56,7 @@ func (r *TasksResource) Columns() []Column {
 		{Title: "NAME", Width: 40},
 		{Title: "STATE", Width: 12},
 		{Title: "WORKER TYPE", Width: 24},
+		{Title: "AGE", Width: 12},
 	}
 }
 
@@ -80,6 +81,7 @@ func (r *TasksResource) ScopedList(taskGroupID string) ([]Row, error) {
 				t.Task.Metadata.Name,
 				t.Status.State,
 				t.Task.WorkerType,
+				formatAge(time.Time(t.Task.Created)),
 			},
 		})
 	}
@@ -123,6 +125,16 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 			runs.WriteString(fmt.Sprintf(" (worker: %s/%s)", run.WorkerGroup, run.WorkerID))
 		}
 		runs.WriteString("\n")
+		runs.WriteString(fmt.Sprintf("    scheduled: %s\n", run.Scheduled))
+		if !time.Time(run.Started).IsZero() {
+			runs.WriteString(fmt.Sprintf("    started:   %s\n", run.Started))
+		}
+		if !time.Time(run.Resolved).IsZero() {
+			runs.WriteString(fmt.Sprintf("    resolved:  %s\n", run.Resolved))
+		}
+		if !time.Time(run.TakenUntil).IsZero() {
+			runs.WriteString(fmt.Sprintf("    takenUntil:%s\n", run.TakenUntil))
+		}
 	}
 	if runs.Len() == 0 {
 		runs.WriteString("  (no runs yet)\n")
@@ -130,13 +142,14 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 
 	body := fmt.Sprintf(
 		"[green]Name:[white] %s\n"+
-			"[green]Description:[white] %s\n"+
+			"[green]Description:[white]\n%s\n\n"+
 			"[green]Owner:[white] %s\n"+
 			"[green]Source:[white] %s\n\n"+
 			"[green]State:[blue] %s[white]\n"+
 			"[green]Provisioner:[white] %s\n"+
 			"[green]Worker Type:[white] %s\n"+
 			"[green]Priority:[white] %s\n\n"+
+			"[green]Payload:[white]\n%s\n\n"+
 			"[green]Created:[white] %s\n"+
 			"[green]Deadline:[white] %s\n"+
 			"[green]Expires:[white] %s\n\n"+
@@ -145,13 +158,14 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 			"[green]Scopes (%d):[white]\n%s\n\n"+
 			"[green]Runs:[white]\n%s",
 		task.Metadata.Name,
-		task.Metadata.Description,
+		renderMarkdown(task.Metadata.Description),
 		task.Metadata.Owner,
 		task.Metadata.Source,
 		status.State,
 		task.ProvisionerID,
 		task.WorkerType,
 		task.Priority,
+		renderYAML(task.Payload),
 		task.Created,
 		task.Deadline,
 		task.Expires,

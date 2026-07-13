@@ -27,6 +27,7 @@ func (r *PendingTasksResource) Columns() []Column {
 		{Title: "NAME", Width: 40},
 		{Title: "WORKER TYPE", Width: 24},
 		{Title: "INSERTED", Width: 24},
+		{Title: "AGE", Width: 12},
 	}
 }
 
@@ -49,6 +50,7 @@ func (r *PendingTasksResource) ScopedList(taskQueueID string) ([]Row, error) {
 				t.Task.Metadata.Name,
 				t.Task.WorkerType,
 				t.Inserted.String(),
+				formatAge(time.Time(t.Inserted)),
 			},
 		})
 	}
@@ -58,6 +60,13 @@ func (r *PendingTasksResource) ScopedList(taskQueueID string) ([]Row, error) {
 
 func (r *PendingTasksResource) EmptyScopeResource() string {
 	return "workerpools"
+}
+
+// ScopeActions returns the worker-pool sibling jump keys (minus "pending"
+// itself) for scope — see resource.ScopeActions.
+func (r *PendingTasksResource) ScopeActions(scope string) []DetailAction {
+	workerPoolID, _ := parseScope(scope)
+	return workerPoolActions(workerPoolID, r.Name())
 }
 
 func (r *PendingTasksResource) Describe(id string) (Detail, error) {
@@ -88,6 +97,7 @@ func (r *ClaimedTasksResource) Columns() []Column {
 		{Title: "NAME", Width: 40},
 		{Title: "WORKER GROUP/ID", Width: 30},
 		{Title: "CLAIMED", Width: 24},
+		{Title: "AGE", Width: 12},
 	}
 }
 
@@ -110,6 +120,7 @@ func (r *ClaimedTasksResource) ScopedList(taskQueueID string) ([]Row, error) {
 				t.Task.Metadata.Name,
 				fmt.Sprintf("%s/%s", t.WorkerGroup, t.WorkerID),
 				t.Claimed.String(),
+				formatAge(time.Time(t.Claimed)),
 			},
 		})
 	}
@@ -119,6 +130,13 @@ func (r *ClaimedTasksResource) ScopedList(taskQueueID string) ([]Row, error) {
 
 func (r *ClaimedTasksResource) EmptyScopeResource() string {
 	return "workerpools"
+}
+
+// ScopeActions returns the worker-pool sibling jump keys (minus "claimed"
+// itself) for scope — see resource.ScopeActions.
+func (r *ClaimedTasksResource) ScopeActions(scope string) []DetailAction {
+	workerPoolID, _ := parseScope(scope)
+	return workerPoolActions(workerPoolID, r.Name())
 }
 
 func (r *ClaimedTasksResource) Describe(id string) (Detail, error) {

@@ -127,3 +127,12 @@ type ServerFaceted interface {
 	FacetList(scope, value string) ([]Row, error)     // fetches only rows matching this tab
 	FacetCounts(scope string) (map[string]int, error) // cheap aggregate counts per tab value; no row fetch
 }
+
+// ScopeActions is implemented by a ScopedResource whose scope has sibling
+// resources reachable via quick jump keys (e.g. a worker pool's
+// workers/pending/claimed/launchconfigs/errors) — it lets a List view expose
+// those keys without navigating back up to the parent's own Detail view.
+type ScopeActions interface {
+	ScopedResource
+	ScopeActions(scope string) []DetailAction
+}

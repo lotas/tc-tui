@@ -52,7 +52,7 @@ func (s *Shell) renderHeaderHints() {
 		{"q quit", "[yellow]q[white] quit"},
 		{": command", "[yellow]:[white] command"},
 		{"/ filter", "[yellow]/[white] filter"},
-		{"Esc back/quit", "[yellow]Esc[white] back/quit"},
+		{"Esc back", "[yellow]Esc[white] back"},
 		{"? help", "[yellow]?[white] help"},
 	}
 	if s.hasFacets() {

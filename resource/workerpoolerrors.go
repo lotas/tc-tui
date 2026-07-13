@@ -66,6 +66,13 @@ func (r *ErrorsResource) EmptyScopeResource() string {
 	return "workerpools"
 }
 
+// ScopeActions returns the worker-pool sibling jump keys (minus "errors"
+// itself) for scope — see resource.ScopeActions.
+func (r *ErrorsResource) ScopeActions(scope string) []DetailAction {
+	workerPoolID, _ := parseScope(scope)
+	return workerPoolActions(workerPoolID, r.Name())
+}
+
 func (r *ErrorsResource) Describe(id string) (Detail, error) {
 	workerPoolID, errorID := parseScope(id)
 
@@ -79,19 +86,20 @@ func (r *ErrorsResource) Describe(id string) (Detail, error) {
 			"[green]Kind:[white] %s\n"+
 			"[green]Title:[white] %s\n"+
 			"[green]Launch Config ID:[white] %s\n\n"+
-			"[green]Description:[white] %s\n\n"+
-			"[green]Extra:[white] %s\n\n",
+			"[green]Description:[white]\n%s\n\n"+
+			"[green]Extra:[white]\n%s\n\n",
 		e.Reported,
 		e.Kind,
 		e.Title,
 		e.LaunchConfigID,
-		e.Description,
-		e.Extra,
+		renderMarkdown(e.Description),
+		renderYAML(e.Extra),
 	)
 
 	return Detail{
-		Title: fmt.Sprintf("Worker Pool Error :: %s", e.ErrorID),
-		Body:  body,
+		Title:   fmt.Sprintf("Worker Pool Error :: %s", e.ErrorID),
+		Body:    body,
+		Actions: workerPoolActions(workerPoolID, r.Name()),
 	}, nil
 }
 

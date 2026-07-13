@@ -99,8 +99,35 @@ func TestErrorsResourceDescribe(t *testing.T) {
 	if detail.Title != "Worker Pool Error :: err-1" {
 		t.Fatalf("unexpected title: %s", detail.Title)
 	}
-	if !strings.Contains(detail.Body, "launch failed") || !strings.Contains(detail.Body, "something went wrong") {
+	body := stripRegionTags(detail.Body)
+	if !strings.Contains(body, "launch failed") || !strings.Contains(body, "something went wrong") {
 		t.Fatalf("unexpected body: %s", detail.Body)
+	}
+	if len(detail.Actions) != 4 {
+		t.Fatalf("expected 4 sibling actions, got %d: %+v", len(detail.Actions), detail.Actions)
+	}
+}
+
+func TestErrorsResourceDescribeRendersExtraAsYAML(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workerPoolError: &tcworkermanager.WorkerPoolError{
+			WorkerPoolID: "gcp/pool-a",
+			ErrorID:      "err-1",
+			Title:        "launch failed",
+			Extra:        []byte(`{"code":"QUOTA_EXCEEDED"}`),
+		},
+	}
+	res := NewErrorsResource(fake)
+
+	detail, err := res.Describe("gcp/pool-a::err-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(detail.Body, "QUOTA_EXCEEDED") {
+		t.Fatalf("expected the rendered extra field in the body, got: %s", detail.Body)
+	}
+	if strings.Contains(detail.Body, `{"code":"QUOTA_EXCEEDED"}`) {
+		t.Fatalf("expected the raw single-line JSON blob to be gone, got: %s", detail.Body)
 	}
 }
 
@@ -112,5 +139,33 @@ func TestErrorsResourceDescribeError(t *testing.T) {
 	_, err := res.Describe("gcp/pool-a::err-1")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+}
+
+func TestErrorsResourceScopeActionsExcludesErrors(t *testing.T) {
+	res := NewErrorsResource(&fakeTaskcluster{})
+
+	actions := res.ScopeActions("gcp/pool-a")
+	if len(actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d: %+v", len(actions), actions)
+	}
+	for _, a := range actions {
+		if a.Target.ResourceName == "errors" {
+			t.Fatalf("expected \"errors\" excluded from its own sibling actions, got %+v", actions)
+		}
+		if a.Target.ID != "gcp/pool-a" {
+			t.Fatalf("expected actions scoped pool-wide to %q, got %+v", "gcp/pool-a", a)
+		}
+	}
+}
+
+func TestErrorsResourceScopeActionsWithLaunchConfigScope(t *testing.T) {
+	res := NewErrorsResource(&fakeTaskcluster{})
+
+	actions := res.ScopeActions("gcp/pool-a::lc-1")
+	for _, a := range actions {
+		if a.Target.ID != "gcp/pool-a" {
+			t.Fatalf("expected actions scoped to the bare pool id %q even from a launch-config-scoped scope, got %+v", "gcp/pool-a", a)
+		}
 	}
 }

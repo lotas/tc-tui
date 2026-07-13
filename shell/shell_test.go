@@ -98,3 +98,34 @@ func TestGlobalInputCapturePassesQuitKeyToFooterInput(t *testing.T) {
 		})
 	}
 }
+
+func TestGlobalInputCaptureDispatchesDetailActionKey(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: "errors"})
+	s := New(registry)
+	s.currentDetailActions = []resource.DetailAction{
+		{Key: 'e', Label: "errors", Target: resource.NavTarget{ResourceName: "errors", ID: "pool-a", Kind: resource.NavScopedList}},
+	}
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'e', tcell.ModNone)
+	if got := s.globalInputCapture(event); got != nil {
+		t.Fatalf("expected the action key to be swallowed, got %#v", got)
+	}
+
+	top, ok := s.stack.Top()
+	if !ok || top.ResourceName != "errors" || top.Scope != "pool-a" || top.Kind != ListKind {
+		t.Fatalf("expected navigation to errors scoped to pool-a, got %+v (ok=%v)", top, ok)
+	}
+}
+
+func TestGlobalInputCaptureUnmatchedRuneIsPassedThrough(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentDetailActions = []resource.DetailAction{
+		{Key: 'e', Label: "errors", Target: resource.NavTarget{ResourceName: "errors", ID: "pool-a"}},
+	}
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModNone)
+	if got := s.globalInputCapture(event); got != event {
+		t.Fatalf("expected an unmatched rune to pass through unchanged, got %#v", got)
+	}
+}

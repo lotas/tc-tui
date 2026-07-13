@@ -3,7 +3,9 @@ package resource
 import (
 	"errors"
 	"testing"
+	"time"
 
+	tcclient "github.com/taskcluster/taskcluster/v101/clients/client-go"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
@@ -13,8 +15,9 @@ func TestPendingTasksResourceScopedList(t *testing.T) {
 	fake := &fakeTaskcluster{
 		pendingTasks: taskcluster.PendingTaskList{
 			{
-				TaskID: "task-1",
-				Task:   tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}, WorkerType: "linux-b-large"},
+				TaskID:   "task-1",
+				Task:     tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}, WorkerType: "linux-b-large"},
+				Inserted: tcclient.Time(time.Now().Add(-time.Minute)),
 			},
 		},
 	}
@@ -30,6 +33,9 @@ func TestPendingTasksResourceScopedList(t *testing.T) {
 	if rows[0].ID != "task-1" || rows[0].Cells[0] != "task-1" ||
 		rows[0].Cells[1] != "build" || rows[0].Cells[2] != "linux-b-large" {
 		t.Fatalf("unexpected row: %+v", rows[0])
+	}
+	if rows[0].Cells[4] == "" {
+		t.Fatalf("expected a non-empty AGE cell, got %+v", rows[0])
 	}
 }
 
@@ -84,6 +90,7 @@ func TestClaimedTasksResourceScopedList(t *testing.T) {
 				Task:        tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}},
 				WorkerGroup: "us-west1",
 				WorkerID:    "i-1234",
+				Claimed:     tcclient.Time(time.Now().Add(-time.Minute)),
 			},
 		},
 	}
@@ -99,6 +106,9 @@ func TestClaimedTasksResourceScopedList(t *testing.T) {
 	if rows[0].ID != "task-1" || rows[0].Cells[0] != "task-1" ||
 		rows[0].Cells[1] != "build" || rows[0].Cells[2] != "us-west1/i-1234" {
 		t.Fatalf("unexpected row: %+v", rows[0])
+	}
+	if rows[0].Cells[4] == "" {
+		t.Fatalf("expected a non-empty AGE cell, got %+v", rows[0])
 	}
 }
 
@@ -142,5 +152,39 @@ func TestClaimedTasksResourceDescribeDelegatesToDescribeTask(t *testing.T) {
 	}
 	if detail.Title != "Task :: build (task-1)" {
 		t.Fatalf("unexpected title: %s", detail.Title)
+	}
+}
+
+func TestPendingTasksResourceScopeActionsExcludesPending(t *testing.T) {
+	res := NewPendingTasksResource(&fakeTaskcluster{})
+
+	actions := res.ScopeActions("gcp/pool-a")
+	if len(actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d: %+v", len(actions), actions)
+	}
+	for _, a := range actions {
+		if a.Target.ResourceName == "pending" {
+			t.Fatalf("expected \"pending\" excluded from its own sibling actions, got %+v", actions)
+		}
+		if a.Target.ID != "gcp/pool-a" {
+			t.Fatalf("expected actions scoped pool-wide to %q, got %+v", "gcp/pool-a", a)
+		}
+	}
+}
+
+func TestClaimedTasksResourceScopeActionsExcludesClaimed(t *testing.T) {
+	res := NewClaimedTasksResource(&fakeTaskcluster{})
+
+	actions := res.ScopeActions("gcp/pool-a")
+	if len(actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d: %+v", len(actions), actions)
+	}
+	for _, a := range actions {
+		if a.Target.ResourceName == "claimed" {
+			t.Fatalf("expected \"claimed\" excluded from its own sibling actions, got %+v", actions)
+		}
+		if a.Target.ID != "gcp/pool-a" {
+			t.Fatalf("expected actions scoped pool-wide to %q, got %+v", "gcp/pool-a", a)
+		}
 	}
 }

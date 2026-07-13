@@ -74,6 +74,32 @@ func (r *WorkerPoolsResource) List() ([]Row, error) {
 	return rows, nil
 }
 
+// workerPoolActions returns the standard set of quick-jump keys to a worker
+// pool's sub-resources (workers/pending/claimed/launchconfigs/errors),
+// scoped pool-wide to workerPoolID. exclude omits the action whose
+// ResourceName matches — typically the resource currently showing the
+// hints itself, since pressing its own key to "jump" to the view already on
+// screen isn't useful. If exclude doesn't match any of the 5 ResourceNames
+// (e.g. a typo), it has no effect and all 5 actions are returned.
+func workerPoolActions(workerPoolID, exclude string) []DetailAction {
+	all := []DetailAction{
+		{Key: 'w', Label: "workers", Target: NavTarget{ResourceName: "workers", ID: workerPoolID, Kind: NavScopedList}},
+		{Key: 'p', Label: "pending", Target: NavTarget{ResourceName: "pending", ID: workerPoolID, Kind: NavScopedList}},
+		{Key: 'c', Label: "claimed", Target: NavTarget{ResourceName: "claimed", ID: workerPoolID, Kind: NavScopedList}},
+		{Key: 'l', Label: "launchconfigs", Target: NavTarget{ResourceName: "launchconfigs", ID: workerPoolID, Kind: NavScopedList}},
+		{Key: 'e', Label: "errors", Target: NavTarget{ResourceName: "errors", ID: workerPoolID, Kind: NavScopedList}},
+	}
+
+	actions := make([]DetailAction, 0, len(all))
+	for _, a := range all {
+		if a.Target.ResourceName == exclude {
+			continue
+		}
+		actions = append(actions, a)
+	}
+	return actions
+}
+
 func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 	pool, err := r.tc.GetWorkerPool(id)
 	if err != nil {
@@ -81,7 +107,7 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 	}
 
 	body := fmt.Sprintf(
-		"[green]Description:[white] %s\n\n"+
+		"[green]Description:[white]\n%s\n\n"+
 			"[green]Created:[white] %s\n"+
 			"[green]Owner:[white] %s\n\n"+
 			"[green]Requested capacity:[blue] %d\n"+
@@ -89,8 +115,8 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 			"[green]Stopped capacity:[blue] %d\n"+
 			"[green]Running count:[blue] %d\n"+
 			"[green]Stopped count:[blue] %d\n\n"+
-			"[green]Config:[white] %s\n\n",
-		pool.Description,
+			"[green]Config:[white]\n%s\n\n",
+		renderMarkdown(pool.Description),
 		pool.Created,
 		pool.Owner,
 		pool.RequestedCapacity,
@@ -98,7 +124,7 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 		pool.StoppedCapacity,
 		pool.RunningCount,
 		pool.StoppedCount,
-		pool.Config,
+		renderYAML(pool.Config),
 	)
 
 	// Best-effort summary lines: a failure in either just omits that line
@@ -112,55 +138,9 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 	}
 
 	return Detail{
-		Title: fmt.Sprintf("Worker Pool :: %s", pool.WorkerPoolID),
-		Body:  body,
-		Actions: []DetailAction{
-			{
-				Key:   'w',
-				Label: "workers",
-				Target: NavTarget{
-					ResourceName: "workers",
-					ID:           pool.WorkerPoolID,
-					Kind:         NavScopedList,
-				},
-			},
-			{
-				Key:   'p',
-				Label: "pending",
-				Target: NavTarget{
-					ResourceName: "pending",
-					ID:           pool.WorkerPoolID,
-					Kind:         NavScopedList,
-				},
-			},
-			{
-				Key:   'c',
-				Label: "claimed",
-				Target: NavTarget{
-					ResourceName: "claimed",
-					ID:           pool.WorkerPoolID,
-					Kind:         NavScopedList,
-				},
-			},
-			{
-				Key:   'l',
-				Label: "launchconfigs",
-				Target: NavTarget{
-					ResourceName: "launchconfigs",
-					ID:           pool.WorkerPoolID,
-					Kind:         NavScopedList,
-				},
-			},
-			{
-				Key:   'e',
-				Label: "errors",
-				Target: NavTarget{
-					ResourceName: "errors",
-					ID:           pool.WorkerPoolID,
-					Kind:         NavScopedList,
-				},
-			},
-		},
+		Title:   fmt.Sprintf("Worker Pool :: %s", pool.WorkerPoolID),
+		Body:    body,
+		Actions: workerPoolActions(pool.WorkerPoolID, ""),
 	}, nil
 }
 

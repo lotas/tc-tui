@@ -163,9 +163,6 @@ func (s *Shell) init() {
 		AddItem(s.table, 0, 1, true)
 
 	s.detail = NewDetailView()
-	s.detail.SetOnAction(func(target resource.NavTarget) {
-		s.navigateTo(target)
-	})
 
 	s.errorView = NewErrorView()
 	s.helpView = NewHelpView()
@@ -193,7 +190,7 @@ func (s *Shell) init() {
 // globalInputCapture handles keys that apply regardless of which content
 // view has focus: `q` quits from navigable views, `:` opens the command bar,
 // `/` opens the filter (list views only), `?` toggles the help overlay, and
-// Esc pops the view stack (or quits at the root, or closes help if open).
+// Esc pops the view stack (a no-op at the root, or closes help if open).
 // While the footer input is active, every key passes through untouched so it
 // can be typed into the input field. While help is open, every key is
 // swallowed except q, Esc/`?`, and the scroll keys.
@@ -254,6 +251,15 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	case event.Rune() == '?':
 		s.openHelp()
 		return nil
+	}
+
+	if event.Key() == tcell.KeyRune {
+		for _, action := range s.currentDetailActions {
+			if event.Rune() == action.Key {
+				s.navigateTo(action.Target)
+				return nil
+			}
+		}
 	}
 
 	return event

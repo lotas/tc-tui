@@ -2,6 +2,7 @@ package resource
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,6 +167,12 @@ func TestLaunchConfigsResourceDescribe(t *testing.T) {
 	if detail.Actions[1].Key != 'e' || detail.Actions[1].Target != wantErrorsTarget {
 		t.Fatalf("unexpected errors action: %+v", detail.Actions[1])
 	}
+	if strings.Contains(detail.Body, `{"minCapacity":1}`) {
+		t.Fatalf("expected the raw single-line JSON blob to be gone, got: %s", detail.Body)
+	}
+	if !strings.Contains(detail.Body, "minCapacity") {
+		t.Fatalf("expected the rendered configuration in the body, got: %s", detail.Body)
+	}
 }
 
 func TestLaunchConfigsResourceDescribeNotFound(t *testing.T) {
@@ -185,5 +192,22 @@ func TestLaunchConfigsResourceDescribeError(t *testing.T) {
 	_, err := res.Describe("gcp/pool-a::lc-1")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+}
+
+func TestLaunchConfigsResourceScopeActionsExcludesLaunchConfigs(t *testing.T) {
+	res := NewLaunchConfigsResource(&fakeTaskcluster{})
+
+	actions := res.ScopeActions("gcp/pool-a")
+	if len(actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d: %+v", len(actions), actions)
+	}
+	for _, a := range actions {
+		if a.Target.ResourceName == "launchconfigs" {
+			t.Fatalf("expected \"launchconfigs\" excluded from its own sibling actions, got %+v", actions)
+		}
+		if a.Target.ID != "gcp/pool-a" {
+			t.Fatalf("expected actions scoped pool-wide to %q, got %+v", "gcp/pool-a", a)
+		}
 	}
 }

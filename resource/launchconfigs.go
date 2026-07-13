@@ -84,6 +84,15 @@ func launchConfigCounts(tc taskcluster.Taskcluster, workerPoolID string) (total,
 	return len(configs), active, nil
 }
 
+// ScopeActions returns the worker-pool sibling jump keys (minus
+// "launchconfigs" itself) for scope — see resource.ScopeActions. This is
+// deliberately not applied to Describe, which already narrows its own w/e
+// actions to one specific launch config.
+func (r *LaunchConfigsResource) ScopeActions(scope string) []DetailAction {
+	workerPoolID, _ := parseScope(scope)
+	return workerPoolActions(workerPoolID, r.Name())
+}
+
 // ScopedList exists only so LaunchConfigsResource still satisfies
 // ScopedResource (needed for the EmptyScopeResource redirect when no scope is
 // given); the shell always prefers FacetList via the ServerFaceted branch.
@@ -136,11 +145,11 @@ func (r *LaunchConfigsResource) Describe(id string) (Detail, error) {
 			"[green]Created:[white] %s\n"+
 				"[green]Last Modified:[white] %s\n"+
 				"[green]Archived:[white] %t\n\n"+
-				"[green]Configuration:[white] %s\n\n",
+				"[green]Configuration:[white]\n%s\n\n",
 			c.Created,
 			c.LastModified,
 			c.IsArchived,
-			c.Configuration,
+			renderYAML(c.Configuration),
 		)
 
 		return Detail{

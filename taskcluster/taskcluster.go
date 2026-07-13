@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
@@ -36,6 +37,7 @@ type Taskcluster interface {
 	GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (WorkerList, error)
 	GetWorkerPoolStateCounts(workerPoolID, launchConfigID string) (map[string]int, error)
 	GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error)
+	GetWorkerRecentTasks(workerPoolID, workerGroup, workerID string) ([]tcqueue.TaskRun, error)
 	GetWorkerPoolLaunchConfigs(workerPoolID string, includeArchived bool) (WorkerPoolLaunchConfigList, error)
 	GetWorkerPoolErrors(workerPoolID, launchConfigID string) (WorkerPoolErrorList, error)
 	GetWorkerPoolError(workerPoolID, errorID string) (*tcworkermanager.WorkerPoolError, error)
@@ -217,6 +219,25 @@ func (tc *TC) GetWorkerPoolStateCounts(workerPoolID, launchConfigID string) (map
 
 func (tc *TC) GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error) {
 	return tc.wm.Worker(workerPoolID, workerGroup, workerID)
+}
+
+// GetWorkerRecentTasks returns the up-to-20 most recent tasks claimed by a
+// worker, via the Queue service's own worker record (distinct from
+// worker-manager's — this is the only place recentTasks is exposed).
+// workerPoolID is split on "/" into the provisionerId/workerType pair the
+// Queue API still expects.
+func (tc *TC) GetWorkerRecentTasks(workerPoolID, workerGroup, workerID string) ([]tcqueue.TaskRun, error) {
+	parts := strings.SplitN(workerPoolID, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid worker pool id %q", workerPoolID)
+	}
+
+	resp, err := tc.queue.GetWorker(parts[0], parts[1], workerGroup, workerID)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.RecentTasks, nil
 }
 
 // GetWorkerPoolLaunchConfigs lists a worker pool's launch configurations.

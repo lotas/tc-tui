@@ -104,7 +104,8 @@ func TestWorkerPoolsResourceDescribe(t *testing.T) {
 		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
 		t.Fatalf("unexpected action[4]: %+v", a)
 	}
-	if !strings.Contains(detail.Body, "a pool") || !strings.Contains(detail.Body, "owner@example.com") {
+	body := stripRegionTags(detail.Body)
+	if !strings.Contains(body, "a pool") || !strings.Contains(body, "owner@example.com") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}
 	if !strings.Contains(detail.Body, "Launch configs:[blue] 2[white] (1 archived)") {
@@ -112,6 +113,28 @@ func TestWorkerPoolsResourceDescribe(t *testing.T) {
 	}
 	if !strings.Contains(detail.Body, "Errors (last 7d):[blue] 4[white]") {
 		t.Fatalf("unexpected body: %s", detail.Body)
+	}
+}
+
+func TestWorkerPoolsResourceDescribeRendersConfigAsYAML(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workerPool: &tcworkermanager.WorkerPoolFullDefinition{
+			WorkerPoolID: "proj/pool-a",
+			Description:  "a pool",
+			Config:       []byte(`{"minCapacity":1,"maxCapacity":5}`),
+		},
+	}
+	res := NewWorkerPoolsResource(fake)
+
+	detail, err := res.Describe("proj/pool-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(detail.Body, "minCapacity") {
+		t.Fatalf("expected the rendered config in the body, got: %s", detail.Body)
+	}
+	if strings.Contains(detail.Body, `{"minCapacity":1,"maxCapacity":5}`) {
+		t.Fatalf("expected the raw single-line JSON blob to be gone, got: %s", detail.Body)
 	}
 }
 
@@ -203,5 +226,39 @@ func TestWorkerPoolsResourceFacetOptionsEmptyRows(t *testing.T) {
 	got := res.FacetOptions(nil)
 	if len(got) != 0 {
 		t.Fatalf("expected no options, got %v", got)
+	}
+}
+
+func TestWorkerPoolActionsWithNoExclusionReturnsAllFive(t *testing.T) {
+	actions := workerPoolActions("proj/pool-a", "")
+
+	if len(actions) != 5 {
+		t.Fatalf("expected all 5 actions, got %d: %+v", len(actions), actions)
+	}
+	for _, a := range actions {
+		if a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
+			t.Fatalf("unexpected action: %+v", a)
+		}
+	}
+}
+
+func TestWorkerPoolActionsExcludesGivenResource(t *testing.T) {
+	actions := workerPoolActions("proj/pool-a", "workers")
+
+	if len(actions) != 4 {
+		t.Fatalf("expected 4 actions (5 minus excluded), got %d: %+v", len(actions), actions)
+	}
+	for _, a := range actions {
+		if a.Target.ResourceName == "workers" {
+			t.Fatalf("expected the \"workers\" action to be excluded, got %+v", actions)
+		}
+	}
+}
+
+func TestWorkerPoolActionsWithUnmatchedExcludeReturnsAllFive(t *testing.T) {
+	actions := workerPoolActions("proj/pool-a", "not-a-real-resource")
+
+	if len(actions) != 5 {
+		t.Fatalf("expected an unmatched exclude to leave all 5 actions, got %d: %+v", len(actions), actions)
 	}
 }

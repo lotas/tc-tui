@@ -1,19 +1,16 @@
 package shell
 
 import (
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/taskcluster/tc-tui/resource"
 )
 
-// DetailView renders a Resource.Describe(id) result, including footer-hint
-// keybindings for any DetailActions (cross-resource jumps). The shell
-// executes the declared NavTarget on keypress without knowing what it means.
+// DetailView renders a Resource.Describe(id) result. Any DetailActions the
+// Detail carries are dispatched by Shell.globalInputCapture (shared with a
+// List view's ScopeActions), not by DetailView itself.
 type DetailView struct {
 	*tview.TextView
-	actions  []resource.DetailAction
-	onAction func(target resource.NavTarget)
 }
 
 func NewDetailView() *DetailView {
@@ -21,31 +18,10 @@ func NewDetailView() *DetailView {
 		TextView: tview.NewTextView(),
 	}
 	d.SetDynamicColors(true).SetWordWrap(true)
-	d.SetInputCapture(d.handleKey)
 
 	return d
 }
 
-func (d *DetailView) SetOnAction(fn func(target resource.NavTarget)) {
-	d.onAction = fn
-}
-
 func (d *DetailView) SetData(detail resource.Detail) {
-	d.actions = detail.Actions
 	d.Clear().SetText(detail.Body).ScrollToBeginning()
-}
-
-func (d *DetailView) handleKey(event *tcell.EventKey) *tcell.EventKey {
-	if d.onAction == nil || event.Key() != tcell.KeyRune {
-		return event
-	}
-
-	for _, action := range d.actions {
-		if action.Key == event.Rune() {
-			d.onAction(action.Target)
-			return nil
-		}
-	}
-
-	return event
 }

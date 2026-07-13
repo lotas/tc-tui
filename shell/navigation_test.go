@@ -790,3 +790,73 @@ func TestNextLoadGenerationRefreshRemainsCurrentWithoutInterveningNavigation(t *
 		t.Fatalf("expected a refresh's captured generation to remain current when nothing has navigated away in the meantime")
 	}
 }
+
+func TestGoBackAtRootIsNoOp(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: "workerpools"})
+	s := New(registry)
+	s.stack.Push(View{ResourceName: "workerpools", Kind: ListKind})
+
+	s.goBack()
+
+	if s.stack.Len() != 1 {
+		t.Fatalf("expected the root view to remain on the stack, got length %d", s.stack.Len())
+	}
+	top, ok := s.stack.Top()
+	if !ok || top.ResourceName != "workerpools" {
+		t.Fatalf("expected root view to remain on top, got %+v (ok=%v)", top, ok)
+	}
+}
+
+func TestGoBackPopsOneLevelWhenNotAtRoot(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: "workerpools"})
+	registry.Register(fakeResource{name: "workers"})
+	s := New(registry)
+	s.stack.Push(View{ResourceName: "workerpools", Kind: ListKind})
+	s.stack.Push(View{ResourceName: "workers", Kind: ListKind, Scope: "pool-a"})
+
+	s.goBack()
+
+	if s.stack.Len() != 1 {
+		t.Fatalf("expected exactly one view left on the stack, got %d", s.stack.Len())
+	}
+	top, ok := s.stack.Top()
+	if !ok || top.ResourceName != "workerpools" {
+		t.Fatalf("expected to be back at workerpools, got %+v (ok=%v)", top, ok)
+	}
+}
+
+type fakeScopeActionsResource struct {
+	fakeScopedResource
+	actions []resource.DetailAction
+}
+
+func (f fakeScopeActionsResource) ScopeActions(scope string) []resource.DetailAction { return f.actions }
+
+func TestRenderListPopulatesDetailActionsFromScopeActions(t *testing.T) {
+	s := New(resource.NewRegistry())
+	res := fakeScopeActionsResource{
+		fakeScopedResource: fakeScopedResource{fakeResource: fakeResource{name: "workers"}},
+		actions: []resource.DetailAction{
+			{Key: 'e', Label: "errors", Target: resource.NavTarget{ResourceName: "errors", ID: "pool-a"}},
+		},
+	}
+
+	s.renderList(res, "pool-a", false)
+
+	if len(s.currentDetailActions) != 1 || s.currentDetailActions[0].Key != 'e' {
+		t.Fatalf("expected ScopeActions to populate currentDetailActions, got %+v", s.currentDetailActions)
+	}
+}
+
+func TestRenderListLeavesDetailActionsNilWithoutScopeActions(t *testing.T) {
+	s := New(resource.NewRegistry())
+	res := fakeResource{name: "workerpools"}
+
+	s.renderList(res, "", false)
+
+	if s.currentDetailActions != nil {
+		t.Fatalf("expected nil currentDetailActions for a resource without ScopeActions, got %+v", s.currentDetailActions)
+	}
+}

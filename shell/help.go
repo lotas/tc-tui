@@ -41,7 +41,7 @@ func buildHelpText(registry *resource.Registry) string {
 		"(list views only) — press the same digit again to reverse direction\n")
 	b.WriteString("  [yellow]Tab[white]/[yellow]Shift+Tab[white]  cycle the facet tab bar, for resources that have one " +
 		"(see below)\n")
-	b.WriteString("  [yellow]Esc[white]   go back / quit at the root\n")
+	b.WriteString("  [yellow]Esc[white]   go back\n")
 	b.WriteString("  [yellow]?[white]     toggle this help screen\n\n")
 
 	b.WriteString("[green]Resources[white]\n\n")
