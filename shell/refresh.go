@@ -39,6 +39,20 @@ func (s *Shell) Invalidate(view View) {
 	}
 }
 
+// refreshCurrent force re-fetches the topmost view, bypassing the list
+// cache — the global `r` key's action. It reuses Invalidate rather than
+// duplicating its fetch/error-handling logic, so a manual refresh behaves
+// exactly like an auto-refresh tick (silent failure keeps the last-good
+// render and shows a transient warning).
+func (s *Shell) refreshCurrent() {
+	top, ok := s.stack.Top()
+	if !ok {
+		return
+	}
+
+	s.Invalidate(top)
+}
+
 // startRefreshLoop stops any existing ticker and, if interval > 0, starts a
 // new one that invalidates view for as long as it stays topmost on the
 // stack.

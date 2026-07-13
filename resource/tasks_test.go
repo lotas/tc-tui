@@ -51,13 +51,18 @@ func TestTaskResourceDescribe(t *testing.T) {
 	if !strings.Contains(detail.Body, "build-linux") || !strings.Contains(detail.Body, "completed") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}
-	if len(detail.Actions) != 1 {
-		t.Fatalf("expected 1 action, got %d", len(detail.Actions))
+	if len(detail.Actions) != 2 {
+		t.Fatalf("expected 2 actions, got %d", len(detail.Actions))
 	}
-	action := detail.Actions[0]
-	if action.Key != 'g' || action.Target.ResourceName != "taskgroup" ||
-		action.Target.ID != "grp-1" || action.Target.Kind != NavDetail {
-		t.Fatalf("unexpected action: %+v", action)
+	groupAction := detail.Actions[0]
+	if groupAction.Key != 'g' || groupAction.Target.ResourceName != "taskgroup" ||
+		groupAction.Target.ID != "grp-1" || groupAction.Target.Kind != NavDetail {
+		t.Fatalf("unexpected action: %+v", groupAction)
+	}
+	depsAction := detail.Actions[1]
+	if depsAction.Key != 'd' || depsAction.Target.ResourceName != "taskdeps" ||
+		depsAction.Target.ID != "task-1" || depsAction.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action: %+v", depsAction)
 	}
 }
 

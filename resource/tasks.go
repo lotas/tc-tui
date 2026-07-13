@@ -45,7 +45,7 @@ func NewTasksResource(tc taskcluster.Taskcluster) *TasksResource {
 }
 
 func (r *TasksResource) Name() string      { return "tasks" }
-func (r *TasksResource) Aliases() []string { return nil }
+func (r *TasksResource) Aliases() []string { return []string{"t"} }
 func (r *TasksResource) Description() string {
 	return "Tasks belonging to one task group (scoped list)"
 }
@@ -182,20 +182,33 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 		runs.String(),
 	)
 
-	return Detail{
-		Title: fmt.Sprintf("Task :: %s (%s)", task.Metadata.Name, taskID),
-		Body:  body,
-		Actions: []DetailAction{
-			{
-				Key:   'g',
-				Label: "task group",
-				Target: NavTarget{
-					ResourceName: "taskgroup",
-					ID:           task.TaskGroupID,
-					Kind:         NavDetail,
-				},
+	actions := []DetailAction{
+		{
+			Key:   'g',
+			Label: "task group",
+			Target: NavTarget{
+				ResourceName: "taskgroup",
+				ID:           task.TaskGroupID,
+				Kind:         NavDetail,
 			},
 		},
+	}
+	if len(task.Dependencies) > 0 {
+		actions = append(actions, DetailAction{
+			Key:   'd',
+			Label: "dependencies",
+			Target: NavTarget{
+				ResourceName: "taskdeps",
+				ID:           taskID,
+				Kind:         NavScopedList,
+			},
+		})
+	}
+
+	return Detail{
+		Title:   fmt.Sprintf("Task :: %s (%s)", task.Metadata.Name, taskID),
+		Body:    body,
+		Actions: actions,
 	}, nil
 }
 

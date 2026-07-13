@@ -52,6 +52,7 @@ func (s *Shell) renderHeaderHints() {
 		{"q quit", "[yellow]q[white] quit"},
 		{": command", "[yellow]:[white] command"},
 		{"/ filter", "[yellow]/[white] filter"},
+		{"r refresh", "[yellow]r[white] refresh"},
 		{"Esc back", "[yellow]Esc[white] back"},
 		{"? help", "[yellow]?[white] help"},
 	}

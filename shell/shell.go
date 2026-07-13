@@ -256,6 +256,9 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	case event.Rune() == '?':
 		s.openHelp()
 		return nil
+	case event.Rune() == 'r':
+		s.refreshCurrent()
+		return nil
 	}
 
 	if event.Key() == tcell.KeyRune {

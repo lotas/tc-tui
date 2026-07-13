@@ -19,7 +19,7 @@ func NewTaskGroupResource(tc taskcluster.Taskcluster) *TaskGroupResource {
 }
 
 func (r *TaskGroupResource) Name() string      { return "taskgroup" }
-func (r *TaskGroupResource) Aliases() []string { return nil }
+func (r *TaskGroupResource) Aliases() []string { return []string{"g"} }
 func (r *TaskGroupResource) Description() string {
 	return "A task group's metadata, looked up directly by task group ID"
 }
