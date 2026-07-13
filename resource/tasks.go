@@ -127,13 +127,18 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 		runs.WriteString("\n")
 		runs.WriteString(fmt.Sprintf("    scheduled: %s\n", run.Scheduled))
 		if !time.Time(run.Started).IsZero() {
-			runs.WriteString(fmt.Sprintf("    started:   %s\n", run.Started))
+			runs.WriteString(fmt.Sprintf("    started:   %s%s\n", run.Started,
+				elapsedSince(time.Time(run.Scheduled), time.Time(run.Started), "scheduled")))
 		}
 		if !time.Time(run.Resolved).IsZero() {
-			runs.WriteString(fmt.Sprintf("    resolved:  %s\n", run.Resolved))
+			runs.WriteString(fmt.Sprintf("    resolved:  %s%s\n", run.Resolved,
+				elapsedSince(time.Time(run.Started), time.Time(run.Resolved), "started")))
 		}
 		if !time.Time(run.TakenUntil).IsZero() {
 			runs.WriteString(fmt.Sprintf("    takenUntil:%s\n", run.TakenUntil))
+		}
+		if !time.Time(run.Started).IsZero() {
+			runs.WriteString(renderRunArtifacts(tc, taskID, run.RunID))
 		}
 	}
 	if runs.Len() == 0 {
@@ -192,4 +197,25 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 			},
 		},
 	}, nil
+}
+
+// renderRunArtifacts lists the artifacts produced by one run, indented to
+// nest under that run's timestamps. A fetch failure is shown inline rather
+// than failing the whole task detail, since the rest of the task is still
+// useful without it.
+func renderRunArtifacts(tc taskcluster.Taskcluster, taskID string, runID int64) string {
+	artifacts, err := tc.GetArtifacts(taskID, runID)
+	if err != nil {
+		return fmt.Sprintf("    artifacts: (failed to load: %s)\n", err)
+	}
+	if len(artifacts) == 0 {
+		return "    artifacts: (none)\n"
+	}
+
+	var b strings.Builder
+	b.WriteString("    artifacts:\n")
+	for _, a := range artifacts {
+		b.WriteString(fmt.Sprintf("      %s (%s, %s)\n", a.Name, a.ContentType, formatBytes(a.ContentLength)))
+	}
+	return b.String()
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
@@ -22,6 +23,7 @@ type PendingTaskList []tcqueue.Var3                        // ListPendingTasks' 
 type ClaimedTaskList []tcqueue.Var4                        // ListClaimedTasks' members
 type WorkerPoolLaunchConfigList []tcworkermanager.Var1     // ListWorkerPoolLaunchConfigs' members
 type WorkerPoolErrorList []tcworkermanager.WorkerPoolError // ListWorkerPoolErrors' members
+type ArtifactList []tcqueue.Artifact                       // ListArtifacts' members
 
 type Taskcluster interface {
 	GetVersion() Version
@@ -49,6 +51,7 @@ type Taskcluster interface {
 	GetTaskGroupTasks(taskGroupID string) (TaskGroupTaskList, error)
 	GetPendingTasks(taskQueueID string) (PendingTaskList, error)
 	GetClaimedTasks(taskQueueID string) (ClaimedTaskList, error)
+	GetArtifacts(taskID string, runID int64) (ArtifactList, error)
 }
 
 type TC struct {
@@ -367,6 +370,24 @@ func (tc *TC) GetClaimedTasks(taskQueueID string) (ClaimedTaskList, error) {
 	}
 
 	return ClaimedTaskList(tasks), nil
+}
+
+// GetArtifacts lists the artifacts produced by one run of a task.
+func (tc *TC) GetArtifacts(taskID string, runID int64) (ArtifactList, error) {
+	runIDStr := strconv.FormatInt(runID, 10)
+
+	artifacts, err := paginate(func(cont string) ([]tcqueue.Artifact, string, error) {
+		resp, err := tc.queue.ListArtifacts(taskID, runIDStr, cont, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Artifacts, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return ArtifactList(artifacts), nil
 }
 
 func (tc *TC) GetRoot() string {

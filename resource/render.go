@@ -79,3 +79,30 @@ func formatAge(t time.Time) string {
 	}
 	return time.Since(t).Round(time.Second).String()
 }
+
+// elapsedSince renders how long after `from` (labelled sinceLabel) the `to`
+// event happened, e.g. " (5m12s after scheduled)" — used to annotate task
+// run timestamps so a reader doesn't have to diff two absolute times by
+// hand. Either time being zero (event not yet reached) renders as "".
+func elapsedSince(from, to time.Time, sinceLabel string) string {
+	if from.IsZero() || to.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf(" (%s after %s)", to.Sub(from).Round(time.Second), sinceLabel)
+}
+
+// formatBytes renders a byte count in human-readable units, e.g. "4.2 MiB".
+func formatBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}

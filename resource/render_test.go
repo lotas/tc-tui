@@ -70,3 +70,23 @@ func TestFormatAgeNonZeroTimeIsNonEmpty(t *testing.T) {
 		t.Fatalf("expected an hours component in a ~2h-old timestamp, got %q", got)
 	}
 }
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0 B"},
+		{1023, "1023 B"},
+		{1024, "1.0 KiB"},
+		{2048, "2.0 KiB"},
+		{5 * 1024 * 1024, "5.0 MiB"},
+		{3 * 1024 * 1024 * 1024, "3.0 GiB"},
+	}
+
+	for _, tt := range tests {
+		if got := formatBytes(tt.n); got != tt.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tt.n, got, tt.want)
+		}
+	}
+}

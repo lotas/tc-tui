@@ -210,6 +210,124 @@ func TestDescribeTaskRunsIncludeTimestamps(t *testing.T) {
 	}
 }
 
+func TestDescribeTaskRunsIncludeElapsedTimeBetweenEvents(t *testing.T) {
+	scheduled := tcclient.Time(time.Now().Add(-time.Hour))
+	started := tcclient.Time(time.Now().Add(-50 * time.Minute))
+	resolved := tcclient.Time(time.Now().Add(-10 * time.Minute))
+	fake := &fakeTaskcluster{
+		task: &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}},
+		taskStatus: &tcqueue.TaskStatusStructure{
+			State: "completed",
+			Runs: []tcqueue.RunInformation{
+				{RunID: 0, State: "completed", Scheduled: scheduled, Started: started, Resolved: resolved},
+			},
+		},
+	}
+	res := NewTaskResource(fake)
+
+	detail, err := res.Describe("task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(detail.Body, "10m0s after scheduled") {
+		t.Fatalf("expected started timestamp annotated with elapsed time since scheduled, got: %s", detail.Body)
+	}
+	if !strings.Contains(detail.Body, "40m0s after started") {
+		t.Fatalf("expected resolved timestamp annotated with elapsed time since started, got: %s", detail.Body)
+	}
+}
+
+func TestDescribeTaskRunOmitsElapsedTimeWhenPriorEventIsUnset(t *testing.T) {
+	resolved := tcclient.Time(time.Now().Add(-10 * time.Minute))
+	fake := &fakeTaskcluster{
+		task: &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}},
+		taskStatus: &tcqueue.TaskStatusStructure{
+			State: "completed",
+			Runs: []tcqueue.RunInformation{
+				{RunID: 0, State: "completed", Resolved: resolved},
+			},
+		},
+	}
+	res := NewTaskResource(fake)
+
+	detail, err := res.Describe("task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(detail.Body, "after started") {
+		t.Fatalf("expected no elapsed annotation when started is unset, got: %s", detail.Body)
+	}
+}
+
+func TestDescribeTaskRunListsArtifactsForStartedRuns(t *testing.T) {
+	started := tcclient.Time(time.Now().Add(-10 * time.Minute))
+	fake := &fakeTaskcluster{
+		task: &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}},
+		taskStatus: &tcqueue.TaskStatusStructure{
+			State: "completed",
+			Runs:  []tcqueue.RunInformation{{RunID: 0, State: "completed", Started: started}},
+		},
+		artifacts: taskcluster.ArtifactList{
+			{Name: "public/logs/live_backing.log", ContentType: "text/plain", ContentLength: 2048},
+			{Name: "public/build.tar.gz", ContentType: "application/gzip", ContentLength: 5 * 1024 * 1024},
+		},
+	}
+	res := NewTaskResource(fake)
+
+	detail, err := res.Describe("task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(detail.Body, "public/logs/live_backing.log") ||
+		!strings.Contains(detail.Body, "public/build.tar.gz") {
+		t.Fatalf("expected artifact names in the body, got: %s", detail.Body)
+	}
+	if !strings.Contains(detail.Body, "2.0 KiB") || !strings.Contains(detail.Body, "5.0 MiB") {
+		t.Fatalf("expected human-readable artifact sizes in the body, got: %s", detail.Body)
+	}
+}
+
+func TestDescribeTaskRunSkipsArtifactFetchForUnstartedRuns(t *testing.T) {
+	fake := &fakeTaskcluster{
+		task: &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}},
+		taskStatus: &tcqueue.TaskStatusStructure{
+			State: "pending",
+			Runs:  []tcqueue.RunInformation{{RunID: 0, State: "pending"}},
+		},
+		artifactsErr: errors.New("should not be called"),
+	}
+	res := NewTaskResource(fake)
+
+	detail, err := res.Describe("task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(detail.Body, "artifacts:") {
+		t.Fatalf("expected no artifacts section for an unstarted run, got: %s", detail.Body)
+	}
+}
+
+func TestDescribeTaskRunShowsArtifactLoadFailureInline(t *testing.T) {
+	started := tcclient.Time(time.Now().Add(-10 * time.Minute))
+	fake := &fakeTaskcluster{
+		task: &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}},
+		taskStatus: &tcqueue.TaskStatusStructure{
+			State: "completed",
+			Runs:  []tcqueue.RunInformation{{RunID: 0, State: "completed", Started: started}},
+		},
+		artifactsErr: errors.New("boom"),
+	}
+	res := NewTaskResource(fake)
+
+	detail, err := res.Describe("task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(detail.Body, "artifacts: (failed to load: boom)") {
+		t.Fatalf("expected inline artifact load failure, got: %s", detail.Body)
+	}
+}
+
 func TestDescribeTaskRunOmitsUnsetTimestamps(t *testing.T) {
 	fake := &fakeTaskcluster{
 		task: &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}},

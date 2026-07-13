@@ -38,6 +38,27 @@ func TestGlobalInputCaptureQuitKeyIsHandledInNavigableViews(t *testing.T) {
 	}
 }
 
+func TestGlobalInputCaptureTranslatesVimKeysToScrollWhenHelpIsOpen(t *testing.T) {
+	tests := []struct {
+		rune rune
+		want tcell.Key
+	}{
+		{'j', tcell.KeyDown},
+		{'k', tcell.KeyUp},
+	}
+
+	for _, tt := range tests {
+		s := New(resource.NewRegistry())
+		s.helpOpen = true
+
+		event := tcell.NewEventKey(tcell.KeyRune, tt.rune, tcell.ModNone)
+		got := s.globalInputCapture(event)
+		if got == nil || got.Key() != tt.want {
+			t.Fatalf("expected %q to translate to %v, got %#v", tt.rune, tt.want, got)
+		}
+	}
+}
+
 type fakeServerFacetedResource struct {
 	fakeResource
 	options []string

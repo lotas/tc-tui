@@ -82,6 +82,9 @@ type fakeTaskcluster struct {
 
 	claimedTasks    taskcluster.ClaimedTaskList
 	claimedTasksErr error
+
+	artifacts    taskcluster.ArtifactList
+	artifactsErr error
 }
 
 func (f *fakeTaskcluster) GetVersion() taskcluster.Version { return taskcluster.Version{} }
@@ -164,4 +167,8 @@ func (f *fakeTaskcluster) GetPendingTasks(taskQueueID string) (taskcluster.Pendi
 
 func (f *fakeTaskcluster) GetClaimedTasks(taskQueueID string) (taskcluster.ClaimedTaskList, error) {
 	return f.claimedTasks, f.claimedTasksErr
+}
+
+func (f *fakeTaskcluster) GetArtifacts(taskID string, runID int64) (taskcluster.ArtifactList, error) {
+	return f.artifacts, f.artifactsErr
 }

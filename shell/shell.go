@@ -208,7 +208,12 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case tcell.KeyUp, tcell.KeyDown, tcell.KeyPgUp, tcell.KeyPgDn, tcell.KeyHome, tcell.KeyEnd:
 			return event // let the HelpView TextView scroll
 		}
-		if event.Rune() == '?' {
+		switch event.Rune() {
+		case 'j':
+			return tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone) // vim-style scroll
+		case 'k':
+			return tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone) // vim-style scroll
+		case '?':
 			s.closeHelp()
 		}
 		return nil
