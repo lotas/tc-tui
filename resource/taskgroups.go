@@ -72,3 +72,18 @@ func (r *TaskGroupResource) Describe(id string) (Detail, error) {
 func (r *TaskGroupResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
 }
+
+// ListWebURL is never expected to be called — TaskGroupResource is a
+// DirectLookup and never renders a List view.
+func (r *TaskGroupResource) ListWebURL(rootURL, scope string) string { return "" }
+
+func (r *TaskGroupResource) DetailWebURL(rootURL, id string) string {
+	return taskGroupWebURL(rootURL, id)
+}
+
+// taskGroupWebURL links to a task group's own page — the web UI's task
+// group page also lists that group's tasks, so this doubles as the link for
+// TasksResource's List view. Shared by TaskGroupResource and TasksResource.
+func taskGroupWebURL(rootURL, taskGroupID string) string {
+	return webUIPath(rootURL, "tasks/groups/"+pathSegment(taskGroupID))
+}

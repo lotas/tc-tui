@@ -66,3 +66,11 @@ func (r *RolesResource) Describe(id string) (Detail, error) {
 func (r *RolesResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
 }
+
+func (r *RolesResource) ListWebURL(rootURL, scope string) string {
+	return webUIPath(rootURL, "auth/roles")
+}
+
+func (r *RolesResource) DetailWebURL(rootURL, id string) string {
+	return webUIPath(rootURL, "auth/roles/"+pathSegment(id))
+}

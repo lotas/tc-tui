@@ -136,3 +136,17 @@ type ScopeActions interface {
 	ScopedResource
 	ScopeActions(scope string) []DetailAction
 }
+
+// WebLinkable is implemented by resources that have a corresponding page in
+// Taskcluster's web UI (a different app sharing the same root URL), letting
+// the shell open that page in a browser. DetailWebURL builds the link for a
+// Detail view (id is the entity's own ID); ListWebURL builds it for a List
+// view (scope is whatever scope that list is currently showing, "" for an
+// unscoped list). Either may return "" if that particular id/scope has no
+// corresponding page in the web UI, in which case the shell shows a warning
+// instead of opening a browser.
+type WebLinkable interface {
+	Resource
+	DetailWebURL(rootURL, id string) string
+	ListWebURL(rootURL, scope string) string
+}

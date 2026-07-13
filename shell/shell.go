@@ -117,6 +117,14 @@ type Shell struct {
 	// isRestore argument for how an in-progress restore is now tracked (a
 	// per-call argument, not a field).
 	restoreFallback string
+
+	// rootURL is set once via SetInfo and used to build web UI links for the
+	// 'o' key (see openInBrowser).
+	rootURL string
+
+	// openBrowser is a seam over the package-level openBrowser func so tests
+	// can capture what would be opened instead of shelling out for real.
+	openBrowser func(url string) error
 }
 
 func New(registry *resource.Registry) *Shell {
@@ -128,6 +136,7 @@ func New(registry *resource.Registry) *Shell {
 		facetByResource:  make(map[string]string),
 		filterByResource: make(map[string]string),
 		cache:            newListCache(),
+		openBrowser:      openBrowser,
 	}
 	s.init()
 
@@ -259,6 +268,9 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	case event.Rune() == 'r':
 		s.refreshCurrent()
 		return nil
+	case event.Rune() == 'o':
+		s.openInBrowser()
+		return nil
 	}
 
 	if event.Key() == tcell.KeyRune {
@@ -295,6 +307,8 @@ func (s *Shell) setTitle(title string) {
 // SetInfo renders the persistent header bar's left block (Taskcluster
 // root/version/client info), replacing the old ui.UI.SetTaskclusterInfo.
 func (s *Shell) SetInfo(root, version, clientID string, authenticated bool) {
+	s.rootURL = root
+
 	clientColor := "yellow"
 	clientExtra := ""
 	if !authenticated {

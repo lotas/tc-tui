@@ -42,6 +42,7 @@ func buildHelpText(registry *resource.Registry) string {
 	b.WriteString("  [yellow]Tab[white]/[yellow]Shift+Tab[white]  cycle the facet tab bar, for resources that have one " +
 		"(see below)\n")
 	b.WriteString("  [yellow]r[white]     refresh the current view, bypassing the cache\n")
+	b.WriteString("  [yellow]o[white]     open the current view in Taskcluster's web UI, if that resource has one\n")
 	b.WriteString("  [yellow]Esc[white]   go back\n")
 	b.WriteString("  [yellow]?[white]     toggle this help screen\n\n")
 

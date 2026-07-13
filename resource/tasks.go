@@ -36,6 +36,14 @@ func (r *TaskResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
 }
 
+// ListWebURL is never expected to be called — TaskResource is a
+// DirectLookup and never renders a List view.
+func (r *TaskResource) ListWebURL(rootURL, scope string) string { return "" }
+
+func (r *TaskResource) DetailWebURL(rootURL, id string) string {
+	return taskWebURL(rootURL, id)
+}
+
 type TasksResource struct {
 	tc taskcluster.Taskcluster
 }
@@ -79,6 +87,16 @@ func (r *TasksResource) Describe(id string) (Detail, error) {
 
 func (r *TasksResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
+}
+
+// ListWebURL links to the task group's own page — scope is the task group
+// ID this list is scoped to.
+func (r *TasksResource) ListWebURL(rootURL, scope string) string {
+	return taskGroupWebURL(rootURL, scope)
+}
+
+func (r *TasksResource) DetailWebURL(rootURL, id string) string {
+	return taskWebURL(rootURL, id)
 }
 
 // taskListColumns is the column set shared by every list view whose rows

@@ -169,6 +169,49 @@ func (r *WorkersResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
 }
 
+// ListWebURL links to the worker-manager pool's workers page, narrowed to a
+// launch config via query param when scope carries one (see FacetList's doc
+// comment for the scope format) — mirroring the web UI's own
+// ?launchConfigId= query param.
+func (r *WorkersResource) ListWebURL(rootURL, scope string) string {
+	workerPoolID, launchConfigID := parseScope(scope)
+	path := "worker-manager/" + pathSegment(workerPoolID) + "/workers"
+	return webUIPath(rootURL, withQuery(path, "launchConfigId", launchConfigID))
+}
+
+// DetailWebURL links to the legacy Provisioners worker page — worker-manager
+// has no per-worker page of its own; the web UI itself still links there
+// (see WMViewWorkers' row links). workerPoolID is split into
+// provisionerId/workerType the same way GetWorkerRecentTasks does.
+func (r *WorkersResource) DetailWebURL(rootURL, id string) string {
+	workerPoolID, workerGroup, workerID, err := parseWorkerID(id)
+	if err != nil {
+		return ""
+	}
+
+	provisionerID, workerType, err := splitWorkerPoolID(workerPoolID)
+	if err != nil {
+		return ""
+	}
+
+	path := fmt.Sprintf(
+		"provisioners/%s/worker-types/%s/workers/%s/%s",
+		pathSegment(provisionerID), pathSegment(workerType), pathSegment(workerGroup), pathSegment(workerID),
+	)
+	return webUIPath(rootURL, path)
+}
+
+// splitWorkerPoolID splits a worker pool ID into the provisionerId/workerType
+// pair the Queue API and the web UI's legacy Provisioners routes still
+// expect — the same split GetWorkerRecentTasks performs.
+func splitWorkerPoolID(workerPoolID string) (provisionerID, workerType string, err error) {
+	parts := strings.SplitN(workerPoolID, "/", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid worker pool id %q", workerPoolID)
+	}
+	return parts[0], parts[1], nil
+}
+
 func composeWorkerID(workerPoolID, workerGroup, workerID string) string {
 	return strings.Join([]string{workerPoolID, workerGroup, workerID}, idSeparator)
 }

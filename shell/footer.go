@@ -59,6 +59,9 @@ func (s *Shell) renderHeaderHints() {
 	if s.hasFacets() {
 		hints = append(hints, hint{"Tab/Shift+Tab switch state", "[yellow]Tab[white]/[yellow]Shift+Tab[white] switch state"})
 	}
+	if url, ok := s.currentWebURL(); ok && url != "" {
+		hints = append(hints, hint{"o open in browser", "[yellow]o[white] open in browser"})
+	}
 	for _, action := range s.currentDetailActions {
 		hints = append(hints, hint{
 			plain:   fmt.Sprintf("<%c> %s", action.Key, action.Label),

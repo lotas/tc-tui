@@ -106,3 +106,19 @@ func (r *ErrorsResource) Describe(id string) (Detail, error) {
 func (r *ErrorsResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
 }
+
+// ListWebURL links to the worker-manager pool's errors page, narrowed to a
+// launch config via query param when scope carries one (see ScopedList's
+// doc comment for the scope format).
+func (r *ErrorsResource) ListWebURL(rootURL, scope string) string {
+	workerPoolID, launchConfigID := parseScope(scope)
+	path := "worker-manager/" + pathSegment(workerPoolID) + "/errors"
+	return webUIPath(rootURL, withQuery(path, "launchConfigId", launchConfigID))
+}
+
+// DetailWebURL links to the same errors page as ListWebURL — there's no
+// per-error route in the web UI, so the specific error ID is dropped.
+func (r *ErrorsResource) DetailWebURL(rootURL, id string) string {
+	workerPoolID, _ := parseScope(id)
+	return webUIPath(rootURL, "worker-manager/"+pathSegment(workerPoolID)+"/errors")
+}

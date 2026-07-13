@@ -184,3 +184,18 @@ func (r *LaunchConfigsResource) Describe(id string) (Detail, error) {
 func (r *LaunchConfigsResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
 }
+
+// ListWebURL links to the worker-manager pool's launch-configs page. scope
+// here is always a bare worker pool ID (see FacetList's doc comment).
+func (r *LaunchConfigsResource) ListWebURL(rootURL, scope string) string {
+	return webUIPath(rootURL, "worker-manager/"+pathSegment(scope)+"/launch-configs")
+}
+
+// DetailWebURL links to the same launch-configs page as ListWebURL, narrowed
+// to this one launch config via query param — there's no per-config route in
+// the web UI.
+func (r *LaunchConfigsResource) DetailWebURL(rootURL, id string) string {
+	workerPoolID, launchConfigID := parseScope(id)
+	path := "worker-manager/" + pathSegment(workerPoolID) + "/launch-configs"
+	return webUIPath(rootURL, withQuery(path, "launchConfigId", launchConfigID))
+}

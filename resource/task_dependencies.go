@@ -68,6 +68,16 @@ func (r *TaskDependenciesResource) Describe(id string) (Detail, error) {
 
 func (r *TaskDependenciesResource) RefreshInterval() time.Duration { return 0 }
 
+// ListWebURL links to the scoped task's own page — there's no dedicated
+// dependencies page in the web UI (dependencies are shown inline on a task's
+// own page), and scope is that task's ID.
+func (r *TaskDependenciesResource) ListWebURL(rootURL, scope string) string {
+	return taskWebURL(rootURL, scope)
+}
+
+// DetailWebURL is never expected to be called — see Describe's doc comment.
+func (r *TaskDependenciesResource) DetailWebURL(rootURL, id string) string { return "" }
+
 // TaskDependentsResource lists tasks that declare the scoped task as one of
 // their own dependencies — the reverse direction of
 // TaskDependenciesResource. Unlike dependencies, the Queue API's
@@ -117,4 +127,14 @@ func (r *TaskDependentsResource) Describe(id string) (Detail, error) {
 
 func (r *TaskDependentsResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
+}
+
+// ListWebURL links to the scoped task's own page — there's no dedicated
+// dependents page in the web UI, and scope is that task's ID.
+func (r *TaskDependentsResource) ListWebURL(rootURL, scope string) string {
+	return taskWebURL(rootURL, scope)
+}
+
+func (r *TaskDependentsResource) DetailWebURL(rootURL, id string) string {
+	return taskWebURL(rootURL, id)
 }

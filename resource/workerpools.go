@@ -147,3 +147,11 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 func (r *WorkerPoolsResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
 }
+
+func (r *WorkerPoolsResource) ListWebURL(rootURL, scope string) string {
+	return webUIPath(rootURL, "worker-manager")
+}
+
+func (r *WorkerPoolsResource) DetailWebURL(rootURL, id string) string {
+	return webUIPath(rootURL, "worker-manager/"+pathSegment(id))
+}

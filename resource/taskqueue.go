@@ -77,6 +77,17 @@ func (r *PendingTasksResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
 }
 
+// ListWebURL links to the legacy Provisioners pending-tasks page — scope is
+// a taskQueueID, i.e. a provisionerId/workerType pair in the same format as
+// a worker pool ID.
+func (r *PendingTasksResource) ListWebURL(rootURL, scope string) string {
+	return taskQueueWebURL(rootURL, scope, "pending-tasks")
+}
+
+func (r *PendingTasksResource) DetailWebURL(rootURL, id string) string {
+	return taskWebURL(rootURL, id)
+}
+
 type ClaimedTasksResource struct {
 	tc taskcluster.Taskcluster
 }
@@ -145,4 +156,36 @@ func (r *ClaimedTasksResource) Describe(id string) (Detail, error) {
 
 func (r *ClaimedTasksResource) RefreshInterval() time.Duration {
 	return 15 * time.Second
+}
+
+// ListWebURL links to the legacy Provisioners claimed-tasks page — scope is
+// a taskQueueID, i.e. a provisionerId/workerType pair in the same format as
+// a worker pool ID.
+func (r *ClaimedTasksResource) ListWebURL(rootURL, scope string) string {
+	return taskQueueWebURL(rootURL, scope, "claimed-tasks")
+}
+
+func (r *ClaimedTasksResource) DetailWebURL(rootURL, id string) string {
+	return taskWebURL(rootURL, id)
+}
+
+// taskQueueWebURL links to a legacy Provisioners page scoped to one task
+// queue (a provisionerId/workerType pair, same format as a worker pool ID),
+// shared by PendingTasksResource and ClaimedTasksResource; page is
+// "pending-tasks" or "claimed-tasks".
+func taskQueueWebURL(rootURL, taskQueueID, page string) string {
+	provisionerID, workerType, err := splitWorkerPoolID(taskQueueID)
+	if err != nil {
+		return ""
+	}
+
+	path := fmt.Sprintf("provisioners/%s/worker-types/%s/%s", pathSegment(provisionerID), pathSegment(workerType), page)
+	return webUIPath(rootURL, path)
+}
+
+// taskWebURL links to a task's own page — shared by every resource whose
+// Detail is a task (TaskResource, PendingTasksResource, ClaimedTasksResource,
+// TasksResource, TaskDependentsResource).
+func taskWebURL(rootURL, taskID string) string {
+	return webUIPath(rootURL, "tasks/"+pathSegment(taskID))
 }
