@@ -77,6 +77,9 @@ type fakeTaskcluster struct {
 	taskGroupTasks    taskcluster.TaskGroupTaskList
 	taskGroupTasksErr error
 
+	dependentTasks    taskcluster.TaskGroupTaskList
+	dependentTasksErr error
+
 	pendingTasks    taskcluster.PendingTaskList
 	pendingTasksErr error
 
@@ -159,6 +162,10 @@ func (f *fakeTaskcluster) GetTaskGroup(taskGroupID string) (*tcqueue.TaskGroupDe
 
 func (f *fakeTaskcluster) GetTaskGroupTasks(taskGroupID string) (taskcluster.TaskGroupTaskList, error) {
 	return f.taskGroupTasks, f.taskGroupTasksErr
+}
+
+func (f *fakeTaskcluster) GetDependentTasks(taskID string) (taskcluster.TaskGroupTaskList, error) {
+	return f.dependentTasks, f.dependentTasksErr
 }
 
 func (f *fakeTaskcluster) GetPendingTasks(taskQueueID string) (taskcluster.PendingTaskList, error) {

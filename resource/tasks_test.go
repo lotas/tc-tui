@@ -51,8 +51,8 @@ func TestTaskResourceDescribe(t *testing.T) {
 	if !strings.Contains(detail.Body, "build-linux") || !strings.Contains(detail.Body, "completed") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}
-	if len(detail.Actions) != 2 {
-		t.Fatalf("expected 2 actions, got %d", len(detail.Actions))
+	if len(detail.Actions) != 3 {
+		t.Fatalf("expected 3 actions, got %d", len(detail.Actions))
 	}
 	groupAction := detail.Actions[0]
 	if groupAction.Key != 'g' || groupAction.Target.ResourceName != "taskgroup" ||
@@ -60,9 +60,39 @@ func TestTaskResourceDescribe(t *testing.T) {
 		t.Fatalf("unexpected action: %+v", groupAction)
 	}
 	depsAction := detail.Actions[1]
-	if depsAction.Key != 'd' || depsAction.Target.ResourceName != "taskdeps" ||
+	if depsAction.Key != 'd' || depsAction.Target.ResourceName != "dependencies" ||
 		depsAction.Target.ID != "task-1" || depsAction.Target.Kind != NavScopedList {
 		t.Fatalf("unexpected action: %+v", depsAction)
+	}
+	dependentsAction := detail.Actions[2]
+	if dependentsAction.Key != 'D' || dependentsAction.Target.ResourceName != "dependents" ||
+		dependentsAction.Target.ID != "task-1" || dependentsAction.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action: %+v", dependentsAction)
+	}
+}
+
+// TestTaskResourceDescribeAlwaysShowsDependentsAction confirms the
+// dependents action appears even for a task with no dependencies of its own
+// — the two directions are independent (see describeTask's comment on why
+// dependents can't be conditionally hidden the way dependencies is).
+func TestTaskResourceDescribeAlwaysShowsDependentsAction(t *testing.T) {
+	fake := &fakeTaskcluster{
+		task:       &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "leaf"}},
+		taskStatus: &tcqueue.TaskStatusStructure{State: "completed"},
+	}
+	res := NewTaskResource(fake)
+
+	detail, err := res.Describe("task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(detail.Actions) != 2 {
+		t.Fatalf("expected 2 actions (task group + dependents, no dependencies), got %d", len(detail.Actions))
+	}
+	dependentsAction := detail.Actions[1]
+	if dependentsAction.Key != 'D' || dependentsAction.Target.ResourceName != "dependents" {
+		t.Fatalf("unexpected action: %+v", dependentsAction)
 	}
 }
 

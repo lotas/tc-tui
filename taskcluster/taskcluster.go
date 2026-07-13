@@ -49,6 +49,7 @@ type Taskcluster interface {
 	GetTaskStatus(taskID string) (*tcqueue.TaskStatusStructure, error)
 	GetTaskGroup(taskGroupID string) (*tcqueue.TaskGroupDefinitionResponse, error)
 	GetTaskGroupTasks(taskGroupID string) (TaskGroupTaskList, error)
+	GetDependentTasks(taskID string) (TaskGroupTaskList, error)
 	GetPendingTasks(taskQueueID string) (PendingTaskList, error)
 	GetClaimedTasks(taskQueueID string) (ClaimedTaskList, error)
 	GetArtifacts(taskID string, runID int64) (ArtifactList, error)
@@ -330,6 +331,23 @@ func (tc *TC) GetTaskGroup(taskGroupID string) (*tcqueue.TaskGroupDefinitionResp
 func (tc *TC) GetTaskGroupTasks(taskGroupID string) (TaskGroupTaskList, error) {
 	tasks, err := paginate(func(cont string) ([]tcqueue.TaskDefinitionAndStatus, string, error) {
 		resp, err := tc.queue.ListTaskGroup(taskGroupID, cont, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Tasks, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return TaskGroupTaskList(tasks), nil
+}
+
+// GetDependentTasks lists tasks that declare taskID as one of their
+// dependencies — the reverse of a task's own Dependencies field.
+func (tc *TC) GetDependentTasks(taskID string) (TaskGroupTaskList, error) {
+	tasks, err := paginate(func(cont string) ([]tcqueue.TaskDefinitionAndStatus, string, error) {
+		resp, err := tc.queue.ListDependentTasks(taskID, cont, PageSize)
 		if err != nil {
 			return nil, "", err
 		}

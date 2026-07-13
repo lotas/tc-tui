@@ -51,13 +51,7 @@ func (r *TasksResource) Description() string {
 }
 
 func (r *TasksResource) Columns() []Column {
-	return []Column{
-		{Title: "TASK ID"},
-		{Title: "NAME", Width: 40},
-		{Title: "STATE", Width: 12},
-		{Title: "WORKER TYPE", Width: 24},
-		{Title: "AGE", Width: 12},
-	}
+	return taskListColumns()
 }
 
 // List is never expected to be called via normal navigation — the shell
@@ -72,6 +66,36 @@ func (r *TasksResource) ScopedList(taskGroupID string) ([]Row, error) {
 		return nil, err
 	}
 
+	return taskListRows(tasks), nil
+}
+
+func (r *TasksResource) EmptyScopeResource() string {
+	return "workerpools"
+}
+
+func (r *TasksResource) Describe(id string) (Detail, error) {
+	return describeTask(r.tc, id)
+}
+
+func (r *TasksResource) RefreshInterval() time.Duration {
+	return 15 * time.Second
+}
+
+// taskListColumns is the column set shared by every list view whose rows
+// are built by taskListRows (TasksResource, TaskDependentsResource).
+func taskListColumns() []Column {
+	return []Column{
+		{Title: "TASK ID"},
+		{Title: "NAME", Width: 40},
+		{Title: "STATE", Width: 12},
+		{Title: "WORKER TYPE", Width: 24},
+		{Title: "AGE", Width: 12},
+	}
+}
+
+// taskListRows builds list rows from a raw task+status list, shared by
+// TasksResource.ScopedList and TaskDependentsResource.ScopedList.
+func taskListRows(tasks taskcluster.TaskGroupTaskList) []Row {
 	rows := make([]Row, 0, len(tasks))
 	for _, t := range tasks {
 		rows = append(rows, Row{
@@ -85,20 +109,7 @@ func (r *TasksResource) ScopedList(taskGroupID string) ([]Row, error) {
 			},
 		})
 	}
-
-	return rows, nil
-}
-
-func (r *TasksResource) EmptyScopeResource() string {
-	return "workerpools"
-}
-
-func (r *TasksResource) Describe(id string) (Detail, error) {
-	return describeTask(r.tc, id)
-}
-
-func (r *TasksResource) RefreshInterval() time.Duration {
-	return 15 * time.Second
+	return rows
 }
 
 // describeTask renders a single task's full detail (definition + status),
@@ -198,12 +209,25 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 			Key:   'd',
 			Label: "dependencies",
 			Target: NavTarget{
-				ResourceName: "taskdeps",
+				ResourceName: "dependencies",
 				ID:           taskID,
 				Kind:         NavScopedList,
 			},
 		})
 	}
+	// Unlike Dependencies, there's no cheap way to know a task's dependent
+	// count up front (listDependentTasks has no counts-only variant), so
+	// this action is always shown — selecting it may just land on an empty
+	// list, same as Taskcluster's own web UI.
+	actions = append(actions, DetailAction{
+		Key:   'D',
+		Label: "dependents",
+		Target: NavTarget{
+			ResourceName: "dependents",
+			ID:           taskID,
+			Kind:         NavScopedList,
+		},
+	})
 
 	return Detail{
 		Title:   fmt.Sprintf("Task :: %s (%s)", task.Metadata.Name, taskID),

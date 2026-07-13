@@ -68,4 +68,3 @@ func TestRefreshCurrentTriggersDetailRefetch(t *testing.T) {
 		return res.calls.Load() > 0
 	})
 }
-
