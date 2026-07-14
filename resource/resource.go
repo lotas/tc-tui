@@ -137,6 +137,22 @@ type ScopeActions interface {
 	ScopeActions(scope string) []DetailAction
 }
 
+// Augmentable is implemented by a Resource whose List()-produced rows can
+// be rendered immediately and then enriched by slower, per-row API calls
+// (e.g. worker pools' Pending/Claimed/Errors columns). The shell renders
+// the base rows as usual, then calls Augment to receive
+// progressively-updated row sets and a completed/total count for a
+// progress indicator.
+type Augmentable interface {
+	Resource
+	// Augment enriches rows (the just-rendered base rows), calling onUpdate
+	// with a fully-independent row snapshot each time new data arrives,
+	// plus a completed/total count. onUpdate may be called from any
+	// goroutine — the shell handles its own synchronization with the UI
+	// thread. Augment blocks until no more updates will come.
+	Augment(rows []Row, onUpdate func(rows []Row, completed, total int))
+}
+
 // WebLinkable is implemented by resources that have a corresponding page in
 // Taskcluster's web UI (a different app sharing the same root URL), letting
 // the shell open that page in a browser. DetailWebURL builds the link for a

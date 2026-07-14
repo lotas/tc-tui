@@ -116,8 +116,13 @@ func (f *fakeTaskcluster) GetWorkerPool(workerPoolID string) (*tcworkermanager.W
 	return f.workerPool, f.workerPoolErr
 }
 
-func (f *fakeTaskcluster) GetTaskQueueCounts(workerPoolIDs []string) map[string]taskcluster.TaskQueueCounts {
-	return f.taskQueueCounts
+// GetTaskQueueCounts calls onEach once per ID, in order, with whatever
+// f.taskQueueCounts holds for that ID (the zero value if absent) — no
+// goroutines, so tests calling it don't need to synchronize.
+func (f *fakeTaskcluster) GetTaskQueueCounts(workerPoolIDs []string, onEach func(workerPoolID string, counts taskcluster.TaskQueueCounts)) {
+	for _, id := range workerPoolIDs {
+		onEach(id, f.taskQueueCounts[id])
+	}
 }
 
 func (f *fakeTaskcluster) GetWorkerPoolErrorCounts() (map[string]int, error) {

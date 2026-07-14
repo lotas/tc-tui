@@ -4,10 +4,16 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
 )
+
+// loadingPlaceholder fills the Pending/Claimed/Errors cells until Augment
+// has enriched them — distinct from both a real number and a blank
+// "unavailable" cell.
+const loadingPlaceholder = "..."
 
 type WorkerPoolsResource struct {
 	tc taskcluster.Taskcluster
@@ -62,32 +68,8 @@ func (r *WorkerPoolsResource) List() ([]Row, error) {
 		return nil, err
 	}
 
-	ids := make([]string, len(pools))
-	for i, pool := range pools {
-		ids[i] = pool.WorkerPoolID
-	}
-	taskQueueCounts := r.tc.GetTaskQueueCounts(ids)
-	errorCounts, errorCountsErr := r.tc.GetWorkerPoolErrorCounts() // best-effort: a failed call leaves the whole column blank
-
 	rows := make([]Row, 0, len(pools))
 	for _, pool := range pools {
-		var pending, claimed string
-		if c, ok := taskQueueCounts[pool.WorkerPoolID]; ok {
-			if c.PendingKnown {
-				pending = fmt.Sprintf("%10d", c.Pending)
-			}
-			if c.ClaimedKnown {
-				claimed = fmt.Sprintf("%10d", c.Claimed)
-			}
-		}
-		// A pool absent from a *successful* bulk result genuinely has zero
-		// errors (the endpoint only breaks down pools that have at least
-		// one) — only a failed call as a whole leaves this column blank.
-		var errs string
-		if errorCountsErr == nil {
-			errs = fmt.Sprintf("%10d", errorCounts[pool.WorkerPoolID])
-		}
-
 		rows = append(rows, Row{
 			ID: pool.WorkerPoolID,
 			Cells: []string{
@@ -95,14 +77,102 @@ func (r *WorkerPoolsResource) List() ([]Row, error) {
 				pool.ProviderID,
 				fmt.Sprintf("%10d", pool.CurrentCapacity),
 				fmt.Sprintf("%10d", pool.RequestedCapacity),
-				pending,
-				claimed,
-				errs,
+				loadingPlaceholder,
+				loadingPlaceholder,
+				loadingPlaceholder,
 			},
 		})
 	}
 
 	return rows, nil
+}
+
+// Augment enriches rows with Pending/Claimed (per pool, concurrently via
+// GetTaskQueueCounts) and Errors (one bulk call), calling onUpdate after
+// every individual piece of data arrives so the shell can redraw
+// progressively instead of blocking until everything is in. See
+// resource.Augmentable.
+func (r *WorkerPoolsResource) Augment(rows []Row, onUpdate func(rows []Row, completed, total int)) {
+	if len(rows) == 0 {
+		return
+	}
+	total := len(rows) + 1 // one tick per pool (pending/claimed) + one for the bulk errors call
+
+	var (
+		mu        sync.Mutex
+		wg        sync.WaitGroup
+		completed int
+	)
+
+	indexByID := make(map[string]int, len(rows))
+	for i, row := range rows {
+		indexByID[row.ID] = i
+	}
+
+	// tick must be called with mu already held by the caller, since it
+	// reads the just-written cells as part of building the snapshot; it
+	// releases mu around the onUpdate call (a caller-supplied function
+	// shouldn't run while this resource holds its own internal lock) and
+	// re-acquires it before returning, since callers' deferred mu.Unlock()
+	// still expects to hold it.
+	tick := func() {
+		completed++
+		snapshot := make([]Row, len(rows))
+		copy(snapshot, rows)
+		for i := range snapshot {
+			snapshot[i].Cells = append([]string(nil), snapshot[i].Cells...)
+		}
+		c := completed
+		mu.Unlock()
+		onUpdate(snapshot, c, total)
+		mu.Lock()
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		errorCounts, err := r.tc.GetWorkerPoolErrorCounts()
+		mu.Lock()
+		for id, idx := range indexByID {
+			if err == nil {
+				rows[idx].Cells[6] = fmt.Sprintf("%10d", errorCounts[id])
+			} else {
+				rows[idx].Cells[6] = "" // the whole bulk call failed — unavailable, not a placeholder forever
+			}
+		}
+		tick()
+		mu.Unlock()
+	}()
+
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		r.tc.GetTaskQueueCounts(ids, func(id string, counts taskcluster.TaskQueueCounts) {
+			mu.Lock()
+			if idx, ok := indexByID[id]; ok {
+				if counts.PendingKnown {
+					rows[idx].Cells[4] = fmt.Sprintf("%10d", counts.Pending)
+				} else {
+					rows[idx].Cells[4] = "" // couldn't be obtained — unavailable, not a placeholder forever
+				}
+				if counts.ClaimedKnown {
+					rows[idx].Cells[5] = fmt.Sprintf("%10d", counts.Claimed)
+				} else {
+					rows[idx].Cells[5] = ""
+				}
+			}
+			tick()
+			mu.Unlock()
+		})
+	}()
+
+	wg.Wait()
 }
 
 // workerPoolActions returns the standard set of quick-jump keys to a worker
@@ -172,8 +242,12 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 	}, nil
 }
 
+// RefreshInterval is longer than most other list resources' (15s) — a
+// refresh reloads the base rows and restarts Augment from scratch, and
+// giving Augment more headroom before the next reload cuts down on how
+// often a slow augmentation run gets cut off partway through.
 func (r *WorkerPoolsResource) RefreshInterval() time.Duration {
-	return 15 * time.Second
+	return 60 * time.Second
 }
 
 func (r *WorkerPoolsResource) ListWebURL(rootURL, scope string) string {

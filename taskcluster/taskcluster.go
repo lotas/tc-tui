@@ -37,7 +37,7 @@ type Taskcluster interface {
 	GetRole(roleID string) (*tcauth.GetRoleResponse, error)
 	GetWorkerPools() (WorkerPoolList, error)
 	GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error)
-	GetTaskQueueCounts(workerPoolIDs []string) map[string]TaskQueueCounts
+	GetTaskQueueCounts(workerPoolIDs []string, onEach func(workerPoolID string, counts TaskQueueCounts))
 	GetWorkerPoolErrorCounts() (map[string]int, error)
 	GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (WorkerList, error)
 	GetWorkerPoolStateCounts(workerPoolID, launchConfigID string) (map[string]int, error)
@@ -196,12 +196,13 @@ type TaskQueueCounts struct {
 }
 
 // GetTaskQueueCounts fetches pending/claimed counts for each of
-// workerPoolIDs concurrently — a worker pool's ID doubles as its task
-// queue's ID, and there is no bulk variant of this endpoint (Taskcluster's
-// own web UI fetches it the same way: one call per pool, batched
-// concurrently rather than sequentially). This is a best-effort list
-// enrichment, not core data, so it never fails as a whole — a pool with
-// neither number obtainable is simply omitted from the result.
+// workerPoolIDs concurrently, calling onEach exactly once per ID as each
+// pool's fetch completes (success or failure) — a worker pool's ID doubles
+// as its task queue's ID, and there is no bulk variant of this endpoint
+// (Taskcluster's own web UI fetches it the same way: one call per pool,
+// batched concurrently rather than sequentially). onEach is always called,
+// even when neither fallback below succeeds (both Known flags false), so a
+// caller counting ticks against len(workerPoolIDs) always reaches it.
 //
 // TaskQueueCounts (the combined, ideal call) requires both
 // queue:pending-count and queue:claimed-count scopes together, so a
@@ -215,14 +216,12 @@ type TaskQueueCounts struct {
 // but perfectly serviceable substitute for a single summary column, given
 // currently-claimed tasks are bounded by worker capacity rather than an
 // unbounded backlog.
-func (tc *TC) GetTaskQueueCounts(workerPoolIDs []string) map[string]TaskQueueCounts {
-	const maxConcurrency = 8
+func (tc *TC) GetTaskQueueCounts(workerPoolIDs []string, onEach func(workerPoolID string, counts TaskQueueCounts)) {
+	const maxConcurrency = 24
 
 	var (
-		mu      sync.Mutex
-		wg      sync.WaitGroup
-		sem     = make(chan struct{}, maxConcurrency)
-		results = make(map[string]TaskQueueCounts, len(workerPoolIDs))
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, maxConcurrency)
 	)
 
 	for _, id := range workerPoolIDs {
@@ -233,12 +232,10 @@ func (tc *TC) GetTaskQueueCounts(workerPoolIDs []string) map[string]TaskQueueCou
 			defer func() { <-sem }()
 
 			if counts, err := tc.queue.TaskQueueCounts(id); err == nil {
-				mu.Lock()
-				results[id] = TaskQueueCounts{
+				onEach(id, TaskQueueCounts{
 					Pending: counts.PendingTasks, PendingKnown: true,
 					Claimed: counts.ClaimedTasks, ClaimedKnown: true,
-				}
-				mu.Unlock()
+				})
 				return
 			}
 
@@ -249,17 +246,11 @@ func (tc *TC) GetTaskQueueCounts(workerPoolIDs []string) map[string]TaskQueueCou
 			if claimed, err := tc.GetClaimedTasks(id); err == nil {
 				result.Claimed, result.ClaimedKnown = int64(len(claimed)), true
 			}
-
-			if result.PendingKnown || result.ClaimedKnown {
-				mu.Lock()
-				results[id] = result
-				mu.Unlock()
-			}
+			onEach(id, result)
 		}(id)
 	}
 
 	wg.Wait()
-	return results
 }
 
 // GetWorkerPoolErrorCounts returns each worker pool's error count over the

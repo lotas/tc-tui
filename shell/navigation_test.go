@@ -168,6 +168,28 @@ func TestRenderListDefaultsToEmptyFilterQueryWhenNeverSet(t *testing.T) {
 	}
 }
 
+func TestApplyListResultBumpsAugmentEpoch(t *testing.T) {
+	s := newTestShellForSort()
+	before := s.augmentEpoch
+
+	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil)
+
+	if s.augmentEpoch != before+1 {
+		t.Fatalf("expected augmentEpoch to increment by exactly 1, got %d (was %d)", s.augmentEpoch, before)
+	}
+}
+
+func TestApplyListResultResetsAugmentProgress(t *testing.T) {
+	s := newTestShellForSort()
+	s.augmentCompleted, s.augmentTotal = 3, 10
+
+	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil)
+
+	if s.augmentCompleted != 0 || s.augmentTotal != 0 {
+		t.Fatalf("expected progress reset to 0/0, got %d/%d", s.augmentCompleted, s.augmentTotal)
+	}
+}
+
 func TestRefreshTableShowsActiveFilterInTitle(t *testing.T) {
 	s := New(resource.NewRegistry())
 	s.currentListResource = "workerpools"
@@ -184,6 +206,28 @@ func TestRefreshTableShowsActiveFilterInTitle(t *testing.T) {
 	s.refreshTable()
 	if got, want := s.content.GetTitle(), "[ Taskcluster :: workerpools ]"; got != want {
 		t.Fatalf("title with cleared filter = %q, want %q", got, want)
+	}
+}
+
+func TestRefreshTableShowsAugmentProgressInTitle(t *testing.T) {
+	s := newTestShellForSort() // currentListResource: "widgets", two rows already set up
+	s.augmentCompleted, s.augmentTotal = 2, 5
+
+	s.refreshTable()
+
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: widgets [2/5] ]"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestRefreshTableHidesAugmentSuffixOnceComplete(t *testing.T) {
+	s := newTestShellForSort()
+	s.augmentCompleted, s.augmentTotal = 5, 5
+
+	s.refreshTable()
+
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: widgets ]"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 

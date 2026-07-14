@@ -3,6 +3,7 @@ package resource
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,15 +42,11 @@ func TestWorkerPoolsResourceList(t *testing.T) {
 	}
 }
 
-func TestWorkerPoolsResourceListIncludesPendingClaimedErrorsColumns(t *testing.T) {
+func TestWorkerPoolsResourceListShowsLoadingPlaceholdersForSlowColumns(t *testing.T) {
 	fake := &fakeTaskcluster{
 		workerPools: taskcluster.WorkerPoolList{
 			{WorkerPoolID: "proj/pool-a", ProviderID: "gcp"},
 		},
-		taskQueueCounts: map[string]taskcluster.TaskQueueCounts{
-			"proj/pool-a": {Pending: 7, PendingKnown: true, Claimed: 3, ClaimedKnown: true},
-		},
-		workerPoolErrorCounts: map[string]int{"proj/pool-a": 2},
 	}
 	res := NewWorkerPoolsResource(fake)
 
@@ -60,79 +57,77 @@ func TestWorkerPoolsResourceListIncludesPendingClaimedErrorsColumns(t *testing.T
 	if len(rows[0].Cells) != 7 {
 		t.Fatalf("expected 7 cells, got %d: %+v", len(rows[0].Cells), rows[0].Cells)
 	}
-	if strings.TrimSpace(rows[0].Cells[4]) != "7" || strings.TrimSpace(rows[0].Cells[5]) != "3" ||
-		strings.TrimSpace(rows[0].Cells[6]) != "2" {
-		t.Fatalf("unexpected pending/claimed/errors cells: %+v", rows[0].Cells)
+	for _, i := range []int{4, 5, 6} {
+		if rows[0].Cells[i] != loadingPlaceholder {
+			t.Fatalf("expected cell %d to be the loading placeholder, got %q", i, rows[0].Cells[i])
+		}
 	}
 }
 
-// TestWorkerPoolsResourceListLeavesClaimedBlankWhenOnlyPendingFallbackSucceeded
-// covers GetTaskQueueCounts's fallback path (TaskQueueCounts requires both
-// pending-count and claimed-count scopes; a credential with only one falls
-// back to the pending-only endpoint, and separately to counting
-// GetClaimedTasks for Claimed) — a number that couldn't be obtained by any
-// path must render blank, not "0", since the zero value must not be
-// mistaken for a genuine count.
-func TestWorkerPoolsResourceListLeavesClaimedBlankWhenOnlyPendingFallbackSucceeded(t *testing.T) {
+// collectAugmentUpdates runs Augment to completion (it blocks until done)
+// and returns every onUpdate call it made, in the order received. Augment
+// runs its two enrichment paths concurrently, so only the LAST call's
+// snapshot (the fully-merged state) and the total call count are safe to
+// assert on — never intermediate ordering between the two paths.
+func collectAugmentUpdates(res *WorkerPoolsResource, rows []Row) [][]Row {
+	var (
+		mu      sync.Mutex
+		updates [][]Row
+	)
+	res.Augment(rows, func(updated []Row, completed, total int) {
+		mu.Lock()
+		updates = append(updates, updated)
+		mu.Unlock()
+	})
+	return updates
+}
+
+func TestWorkerPoolsResourceAugmentFillsInAllThreeColumns(t *testing.T) {
 	fake := &fakeTaskcluster{
-		workerPools: taskcluster.WorkerPoolList{
-			{WorkerPoolID: "proj/pool-a", ProviderID: "gcp"},
-		},
 		taskQueueCounts: map[string]taskcluster.TaskQueueCounts{
-			"proj/pool-a": {Pending: 7, PendingKnown: true}, // ClaimedKnown left false, as the real fallback produces
+			"proj/pool-a": {Pending: 7, PendingKnown: true, Claimed: 3, ClaimedKnown: true},
 		},
+		workerPoolErrorCounts: map[string]int{"proj/pool-a": 2},
 	}
 	res := NewWorkerPoolsResource(fake)
+	rows := []Row{{ID: "proj/pool-a", Cells: []string{"proj/pool-a", "gcp", "0", "0", loadingPlaceholder, loadingPlaceholder, loadingPlaceholder}}}
 
-	rows, err := res.List()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	updates := collectAugmentUpdates(res, rows)
+
+	if len(updates) != 2 { // 1 pool tick + 1 bulk-errors tick
+		t.Fatalf("expected 2 onUpdate calls, got %d", len(updates))
 	}
-	if strings.TrimSpace(rows[0].Cells[4]) != "7" {
-		t.Fatalf("expected pending to still show up, got %q", rows[0].Cells[4])
-	}
-	if strings.TrimSpace(rows[0].Cells[5]) != "" {
-		t.Fatalf("expected claimed to be blank (unknown), got %q", rows[0].Cells[5])
+	last := updates[len(updates)-1][0]
+	if strings.TrimSpace(last.Cells[4]) != "7" || strings.TrimSpace(last.Cells[5]) != "3" || strings.TrimSpace(last.Cells[6]) != "2" {
+		t.Fatalf("unexpected final cells: %+v", last.Cells)
 	}
 }
 
-func TestWorkerPoolsResourceListLeavesColumnsBlankWhenCountsMissing(t *testing.T) {
-	fake := &fakeTaskcluster{
-		workerPools: taskcluster.WorkerPoolList{
-			{WorkerPoolID: "proj/pool-a", ProviderID: "gcp"},
-		},
-		workerPoolErrorCountsErr: errors.New("boom"),
-	}
+func TestWorkerPoolsResourceAugmentRendersZeroErrorsForPoolAbsentFromSuccessfulBulkResult(t *testing.T) {
+	fake := &fakeTaskcluster{workerPoolErrorCounts: map[string]int{}} // succeeds, but omits pool-a
 	res := NewWorkerPoolsResource(fake)
+	rows := []Row{{ID: "proj/pool-a", Cells: []string{"proj/pool-a", "gcp", "0", "0", loadingPlaceholder, loadingPlaceholder, loadingPlaceholder}}}
 
-	rows, err := res.List()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.TrimSpace(rows[0].Cells[4]) != "" || strings.TrimSpace(rows[0].Cells[5]) != "" ||
-		strings.TrimSpace(rows[0].Cells[6]) != "" {
-		t.Fatalf("expected blank pending/claimed/errors cells on missing/error data, got: %+v", rows[0].Cells)
+	updates := collectAugmentUpdates(res, rows)
+
+	last := updates[len(updates)-1][0]
+	if strings.TrimSpace(last.Cells[6]) != "0" {
+		t.Fatalf("expected 0 errors for a pool absent from a successful bulk result, got %q", last.Cells[6])
 	}
 }
 
-func TestWorkerPoolsResourceListRendersZeroErrorsForPoolAbsentFromSuccessfulBulkResult(t *testing.T) {
-	fake := &fakeTaskcluster{
-		workerPools: taskcluster.WorkerPoolList{
-			{WorkerPoolID: "proj/pool-a", ProviderID: "gcp"},
-		},
-		// workerPoolErrorCounts succeeds (no error) but simply omits
-		// pool-a, exactly like the real bulk endpoint omitting any pool
-		// with zero errors in its per-pool breakdown.
-		workerPoolErrorCounts: map[string]int{},
-	}
+func TestWorkerPoolsResourceAugmentLeavesColumnsBlankWhenNothingObtained(t *testing.T) {
+	fake := &fakeTaskcluster{workerPoolErrorCountsErr: errors.New("boom")} // taskQueueCounts left nil too
 	res := NewWorkerPoolsResource(fake)
+	rows := []Row{{ID: "proj/pool-a", Cells: []string{"proj/pool-a", "gcp", "0", "0", loadingPlaceholder, loadingPlaceholder, loadingPlaceholder}}}
 
-	rows, err := res.List()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.TrimSpace(rows[0].Cells[6]) != "0" {
-		t.Fatalf("expected a pool absent from a successful bulk result to render 0 errors, got %q", rows[0].Cells[6])
+	updates := collectAugmentUpdates(res, rows)
+
+	last := updates[len(updates)-1][0]
+	for _, i := range []int{4, 5, 6} {
+		if strings.TrimSpace(last.Cells[i]) != "" {
+			t.Fatalf("expected cell %d blank when nothing was obtained, got %q", i, last.Cells[i])
+		}
 	}
 }
 
@@ -350,6 +345,14 @@ func TestWorkerPoolsResourceFacetOptionsEmptyRows(t *testing.T) {
 	got := res.FacetOptions(nil)
 	if len(got) != 0 {
 		t.Fatalf("expected no options, got %v", got)
+	}
+}
+
+func TestWorkerPoolsResourceRefreshInterval(t *testing.T) {
+	res := NewWorkerPoolsResource(&fakeTaskcluster{})
+
+	if got, want := res.RefreshInterval(), 60*time.Second; got != want {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }
 

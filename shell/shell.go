@@ -75,6 +75,29 @@ type Shell struct {
 	currentFacetCounts   map[string]int
 	facetByResource      map[string]string
 
+	// augmentCompleted/augmentTotal track an in-progress Augmentable.Augment
+	// call for the current list view — augmentTotal == 0 means no
+	// augmentation is active (or applicable), so refreshTable's title
+	// suffix is hidden. Reset to 0,0 by applyListResult on every fresh
+	// base-row render (navigation, refresh, or a cache hit — which never
+	// gets a follow-up Augment call).
+	augmentCompleted int
+	augmentTotal     int
+
+	// augmentEpoch is bumped by applyListResult every time base rows are
+	// freshly applied for a list view. A refresh reuses the same View and
+	// the same loadGeneration as the render it's refreshing (see
+	// loadGeneration's doc comment) — isStaleLoad/isTopView alone can't
+	// tell a slow, still-in-flight Augment run left over from a PRIOR
+	// refresh cycle apart from one belonging to the CURRENT rows on
+	// screen. loadList captures the epoch right after applying a given
+	// set of base rows and threads it through to that Augment call's
+	// onUpdate closure, which drops any tick where the epoch has since
+	// moved on — otherwise a slow augmentation's late ticks would
+	// overwrite a newer reload's fresh (placeholder) rows with stale
+	// computed values.
+	augmentEpoch int
+
 	activeContent tview.Primitive
 
 	stopRefresh chan struct{}

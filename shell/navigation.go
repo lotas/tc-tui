@@ -224,6 +224,9 @@ func (s *Shell) refreshTable() {
 	if s.filterQuery != "" {
 		title += " (" + s.filterQuery + ")"
 	}
+	if s.augmentTotal > 0 && s.augmentCompleted < s.augmentTotal {
+		title += fmt.Sprintf(" [%d/%d]", s.augmentCompleted, s.augmentTotal)
+	}
 	s.setTitle(title)
 
 	rows := FilterRows(s.lastRows, s.filterQuery)
@@ -351,6 +354,8 @@ func (s *Shell) restoreFacetValue(sf resource.ServerFaceted, name string) string
 // path.
 func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, counts map[string]int) {
 	s.lastRows = rows
+	s.augmentCompleted, s.augmentTotal = 0, 0
+	s.augmentEpoch++
 	if counts != nil {
 		s.currentFacetCounts = counts
 	}
@@ -423,6 +428,7 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 		var rows []resource.Row
 		var counts map[string]int
 		var err error
+		var epoch int
 
 		if sf, ok := res.(resource.ServerFaceted); ok {
 			rows, err = sf.FacetList(scope, facetValue)
@@ -470,9 +476,30 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 			}
 
 			s.cache.set(key, cacheEntry{rows: rows, counts: counts, fetchedAt: time.Now()})
-			s.applyListResult(res, rows, counts)
+			s.applyListResult(res, rows, counts) // bumps s.augmentEpoch
+			epoch = s.augmentEpoch
 			recordVisit() // <-- new
 		})
+
+		if err == nil {
+			if a, ok := res.(resource.Augmentable); ok {
+				view := View{ResourceName: res.Name(), Kind: ListKind, Scope: scope}
+				a.Augment(rows, func(updated []resource.Row, completed, total int) {
+					s.app.QueueUpdateDraw(func() {
+						if s.isStaleLoad(gen) || !s.isTopView(view) || facetValue != s.currentFacetValue {
+							return // the same staleness checks the base-rows success branch above uses
+						}
+						if s.augmentEpoch != epoch {
+							return // a newer base-row render for this view has since started — drop this now-stale tick rather than clobbering fresher rows
+						}
+						s.lastRows = updated
+						s.augmentCompleted, s.augmentTotal = completed, total
+						s.refreshTable()
+						s.cache.set(key, cacheEntry{rows: updated, counts: counts, fetchedAt: time.Now()})
+					})
+				})
+			}
+		}
 	}()
 }
 
