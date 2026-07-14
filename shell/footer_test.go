@@ -67,6 +67,30 @@ func TestRenderHeaderHintsOmitsTabHintWhenNotFaceted(t *testing.T) {
 	}
 }
 
+func TestHeaderRowsNeededNeverShrinksBelowThree(t *testing.T) {
+	for _, hintCount := range []int{0, 1, 5, 9} {
+		if got := headerRowsNeeded(hintCount); got != 3 {
+			t.Errorf("headerRowsNeeded(%d) = %d, want 3", hintCount, got)
+		}
+	}
+}
+
+func TestHeaderRowsNeededGrowsWithHintCount(t *testing.T) {
+	cases := []struct {
+		hintCount int
+		want      int
+	}{
+		{10, 4}, // one hint past the 3x3 grid needs a 4th row
+		{12, 4},
+		{13, 5},
+	}
+	for _, c := range cases {
+		if got := headerRowsNeeded(c.hintCount); got != c.want {
+			t.Errorf("headerRowsNeeded(%d) = %d, want %d", c.hintCount, got, c.want)
+		}
+	}
+}
+
 func TestRenderBreadcrumbsEmptyStack(t *testing.T) {
 	s := New(resource.NewRegistry())
 

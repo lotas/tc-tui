@@ -97,6 +97,30 @@ func (s *Shell) renderHeaderHints() {
 	}
 
 	s.headerHint.SetText(b.String())
+
+	// The header row's height is fixed at grid-construction time (see
+	// s.root.SetRows in init) to fit headerLeft's constant 3 lines. A detail
+	// view can expose enough DetailActions to need more hint rows than that
+	// — grow the header row to fit rather than silently clipping hints below
+	// the visible area.
+	//
+	// s.root doesn't exist yet on the very first call, made from initFooter
+	// before the grid is constructed — nothing to resize yet in that case.
+	if s.root != nil {
+		s.root.SetRows(headerRowsNeeded(len(hints)), 0, 1)
+	}
+}
+
+// headerRowsNeeded returns how tall the header grid row must be to fit
+// hintCount hints laid out hintColumns-wide, never shrinking below 3 —
+// headerLeft always renders exactly 3 lines (root URL, version, client ID)
+// regardless of how few hints there are.
+func headerRowsNeeded(hintCount int) int {
+	rows := (hintCount + hintColumns - 1) / hintColumns
+	if rows < 3 {
+		return 3
+	}
+	return rows
 }
 
 // renderBreadcrumbs rebuilds the footer's navigation trail from the current

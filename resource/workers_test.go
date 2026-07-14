@@ -229,6 +229,59 @@ func TestWorkersResourceDescribeShowsRecentTasksUnavailableOnError(t *testing.T)
 	}
 }
 
+func TestWorkersResourceDescribeShowsRecentTasksActionWhenTasksExist(t *testing.T) {
+	fake := &fakeTaskcluster{
+		worker: &tcworkermanager.WorkerFullDefinition{
+			WorkerPoolID: "gcp/pool-a",
+			WorkerGroup:  "us-west1",
+			WorkerID:     "i-1234",
+		},
+		workerRecentTasks: []tcqueue.TaskRun{{TaskID: "task-1", RunID: 0}},
+	}
+	res := NewWorkersResource(fake)
+
+	detail, err := res.Describe("gcp/pool-a::us-west1::i-1234")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var found *DetailAction
+	for i := range detail.Actions {
+		if detail.Actions[i].Key == 't' {
+			found = &detail.Actions[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a 't' recent-tasks action, got %+v", detail.Actions)
+	}
+	if found.Target.ResourceName != "recenttasks" || found.Target.ID != "gcp/pool-a::us-west1::i-1234" ||
+		found.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected recent-tasks action target: %+v", found.Target)
+	}
+}
+
+func TestWorkersResourceDescribeOmitsRecentTasksActionWhenNoTasks(t *testing.T) {
+	fake := &fakeTaskcluster{
+		worker: &tcworkermanager.WorkerFullDefinition{
+			WorkerPoolID: "gcp/pool-a",
+			WorkerGroup:  "us-west1",
+			WorkerID:     "i-1234",
+		},
+	}
+	res := NewWorkersResource(fake)
+
+	detail, err := res.Describe("gcp/pool-a::us-west1::i-1234")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, a := range detail.Actions {
+		if a.Key == 't' {
+			t.Fatalf("expected no 't' action when there are no recent tasks, got %+v", detail.Actions)
+		}
+	}
+}
+
 func TestWorkersResourceDescribeOmitsRecentTasksSectionWhenGenuinelyEmpty(t *testing.T) {
 	fake := &fakeTaskcluster{
 		worker: &tcworkermanager.WorkerFullDefinition{

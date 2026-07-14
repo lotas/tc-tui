@@ -147,6 +147,7 @@ func (r *WorkersResource) Describe(id string) (Detail, error) {
 	// A failure here (e.g. the caller lacks queue:get-worker) must render as
 	// visibly "unavailable" rather than being silently indistinguishable from
 	// a worker with genuinely zero recent tasks.
+	actions := workerPoolActions(workerPoolID, r.Name())
 	switch tasks, err := r.tc.GetWorkerRecentTasks(workerPoolID, workerGroup, workerID); {
 	case err != nil:
 		body += fmt.Sprintf("\n[green]Recent Tasks:[white] [red]unavailable (%s)[white]\n", err)
@@ -156,12 +157,21 @@ func (r *WorkersResource) Describe(id string) (Detail, error) {
 			b.WriteString(fmt.Sprintf("  %s (run %d)\n", t.TaskID, t.RunID))
 		}
 		body += fmt.Sprintf("\n[green]Recent Tasks (%d):[white]\n%s", len(tasks), b.String())
+		actions = append(actions, DetailAction{
+			Key:   't',
+			Label: "recent tasks",
+			Target: NavTarget{
+				ResourceName: "recenttasks",
+				ID:           id,
+				Kind:         NavScopedList,
+			},
+		})
 	}
 
 	return Detail{
 		Title:   fmt.Sprintf("Worker :: %s", worker.WorkerID),
 		Body:    body,
-		Actions: workerPoolActions(workerPoolID, r.Name()),
+		Actions: actions,
 	}, nil
 }
 
@@ -184,6 +194,14 @@ func (r *WorkersResource) ListWebURL(rootURL, scope string) string {
 // (see WMViewWorkers' row links). workerPoolID is split into
 // provisionerId/workerType the same way GetWorkerRecentTasks does.
 func (r *WorkersResource) DetailWebURL(rootURL, id string) string {
+	return workerDetailWebURL(rootURL, id)
+}
+
+// workerDetailWebURL is WorkersResource.DetailWebURL's implementation,
+// extracted as a free function so other resources scoped by worker ID (e.g.
+// WorkerRecentTasksResource) can link back to the same page without needing
+// a WorkersResource instance.
+func workerDetailWebURL(rootURL, id string) string {
 	workerPoolID, workerGroup, workerID, err := parseWorkerID(id)
 	if err != nil {
 		return ""

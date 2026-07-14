@@ -221,6 +221,9 @@ func (s *Shell) toggleSort(column int) {
 // s.filterQuery, s.currentFacetValue, or s.currentSort changes.
 func (s *Shell) refreshTable() {
 	title := s.currentListResource
+	if s.currentListScope != "" {
+		title += " (" + s.currentListScope + ")"
+	}
 	if s.filterQuery != "" {
 		title += " (" + s.filterQuery + ")"
 	}
@@ -303,6 +306,7 @@ func (s *Shell) renderList(res resource.Resource, scope string, isRestore bool) 
 	s.closeFooterInput()
 	s.filterQuery = s.filterByResource[res.Name()] // "" if never set
 	s.currentListResource = res.Name()
+	s.currentListScope = scope
 	s.currentColumns = res.Columns()
 	s.currentSort = s.sortByResource[res.Name()] // zero value (SortNone) if not yet sorted
 

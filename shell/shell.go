@@ -56,6 +56,7 @@ type Shell struct {
 	pendingLookup    resource.Resource // set while footerMode == footerPrompt; the resource awaiting an id
 
 	currentListResource  string
+	currentListScope     string // "" for an unscoped list
 	currentColumns       []resource.Column
 	lastRows             []resource.Row
 	filterQuery          string

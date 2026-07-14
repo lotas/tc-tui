@@ -51,8 +51,8 @@ func TestTaskResourceDescribe(t *testing.T) {
 	if !strings.Contains(detail.Body, "build-linux") || !strings.Contains(detail.Body, "completed") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}
-	if len(detail.Actions) != 3 {
-		t.Fatalf("expected 3 actions, got %d", len(detail.Actions))
+	if len(detail.Actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d", len(detail.Actions))
 	}
 	groupAction := detail.Actions[0]
 	if groupAction.Key != 'g' || groupAction.Target.ResourceName != "taskgroup" ||
@@ -68,6 +68,11 @@ func TestTaskResourceDescribe(t *testing.T) {
 	if dependentsAction.Key != 'D' || dependentsAction.Target.ResourceName != "dependents" ||
 		dependentsAction.Target.ID != "task-1" || dependentsAction.Target.Kind != NavScopedList {
 		t.Fatalf("unexpected action: %+v", dependentsAction)
+	}
+	runsAction := detail.Actions[3]
+	if runsAction.Key != 'R' || runsAction.Target.ResourceName != "runs" ||
+		runsAction.Target.ID != "task-1" || runsAction.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action: %+v", runsAction)
 	}
 }
 
@@ -119,6 +124,28 @@ func TestTaskResourceDescribeAlwaysShowsDependentsAction(t *testing.T) {
 	dependentsAction := detail.Actions[1]
 	if dependentsAction.Key != 'D' || dependentsAction.Target.ResourceName != "dependents" {
 		t.Fatalf("unexpected action: %+v", dependentsAction)
+	}
+}
+
+// TestTaskResourceDescribeOmitsRunsActionWhenNoRuns confirms the 'R' runs
+// action is hidden for a task with no runs yet — unlike dependents, there's
+// nothing useful to browse.
+func TestTaskResourceDescribeOmitsRunsActionWhenNoRuns(t *testing.T) {
+	fake := &fakeTaskcluster{
+		task:       &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "leaf"}},
+		taskStatus: &tcqueue.TaskStatusStructure{State: "unscheduled"},
+	}
+	res := NewTaskResource(fake)
+
+	detail, err := res.Describe("task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, a := range detail.Actions {
+		if a.Key == 'R' {
+			t.Fatalf("expected no 'R' action when there are no runs, got %+v", detail.Actions)
+		}
 	}
 }
 

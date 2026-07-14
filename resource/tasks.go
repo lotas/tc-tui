@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
+
 	"github.com/taskcluster/tc-tui/taskcluster"
 )
 
@@ -146,29 +148,7 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 
 	var runs strings.Builder
 	for _, run := range status.Runs {
-		runs.WriteString(fmt.Sprintf("  run %d: [blue]%s[white]", run.RunID, run.State))
-		if run.ReasonResolved != "" {
-			runs.WriteString(fmt.Sprintf(" (reason: %s)", run.ReasonResolved))
-		}
-		if run.WorkerGroup != "" || run.WorkerID != "" {
-			runs.WriteString(fmt.Sprintf(" (worker: %s/%s)", run.WorkerGroup, run.WorkerID))
-		}
-		runs.WriteString("\n")
-		runs.WriteString(fmt.Sprintf("    scheduled: %s\n", run.Scheduled))
-		if !time.Time(run.Started).IsZero() {
-			runs.WriteString(fmt.Sprintf("    started:   %s%s\n", run.Started,
-				elapsedSince(time.Time(run.Scheduled), time.Time(run.Started), "scheduled")))
-		}
-		if !time.Time(run.Resolved).IsZero() {
-			runs.WriteString(fmt.Sprintf("    resolved:  %s%s\n", run.Resolved,
-				elapsedSince(time.Time(run.Started), time.Time(run.Resolved), "started")))
-		}
-		if !time.Time(run.TakenUntil).IsZero() {
-			runs.WriteString(fmt.Sprintf("    takenUntil:%s\n", run.TakenUntil))
-		}
-		if !time.Time(run.Started).IsZero() {
-			runs.WriteString(renderRunArtifacts(tc, taskID, run.RunID))
-		}
+		runs.WriteString(renderRunBody(tc, taskID, run, "  "))
 	}
 	if runs.Len() == 0 {
 		runs.WriteString("  (no runs yet)\n")
@@ -236,12 +216,56 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 			Kind:         NavScopedList,
 		},
 	})
+	if len(status.Runs) > 0 {
+		actions = append(actions, DetailAction{
+			Key:   'R',
+			Label: "runs",
+			Target: NavTarget{
+				ResourceName: "runs",
+				ID:           taskID,
+				Kind:         NavScopedList,
+			},
+		})
+	}
 
 	return Detail{
 		Title:   fmt.Sprintf("Task :: %s (%s)", task.Metadata.Name, taskID),
 		Body:    body,
 		Actions: actions,
 	}, nil
+}
+
+// renderRunBody renders one run's state, timestamps, and (if started)
+// artifacts, shared by describeTask's inline runs section (indent "  ") and
+// TaskRunsResource.Describe's single-run detail view (indent "").
+func renderRunBody(tc taskcluster.Taskcluster, taskID string, run tcqueue.RunInformation, indent string) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%srun %d: [blue]%s[white]", indent, run.RunID, run.State))
+	if run.ReasonResolved != "" {
+		b.WriteString(fmt.Sprintf(" (reason: %s)", run.ReasonResolved))
+	}
+	if run.WorkerGroup != "" || run.WorkerID != "" {
+		b.WriteString(fmt.Sprintf(" (worker: %s/%s)", run.WorkerGroup, run.WorkerID))
+	}
+	b.WriteString("\n")
+
+	fieldIndent := indent + "  "
+	b.WriteString(fmt.Sprintf("%sscheduled: %s\n", fieldIndent, run.Scheduled))
+	if !time.Time(run.Started).IsZero() {
+		b.WriteString(fmt.Sprintf("%sstarted:   %s%s\n", fieldIndent, run.Started,
+			elapsedSince(time.Time(run.Scheduled), time.Time(run.Started), "scheduled")))
+	}
+	if !time.Time(run.Resolved).IsZero() {
+		b.WriteString(fmt.Sprintf("%sresolved:  %s%s\n", fieldIndent, run.Resolved,
+			elapsedSince(time.Time(run.Started), time.Time(run.Resolved), "started")))
+	}
+	if !time.Time(run.TakenUntil).IsZero() {
+		b.WriteString(fmt.Sprintf("%stakenUntil:%s\n", fieldIndent, run.TakenUntil))
+	}
+	if !time.Time(run.Started).IsZero() {
+		b.WriteString(renderRunArtifacts(tc, taskID, run.RunID))
+	}
+	return b.String()
 }
 
 // renderRunArtifacts lists the artifacts produced by one run, indented to

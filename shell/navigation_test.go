@@ -157,6 +157,29 @@ func TestRenderListRestoresRememberedFilterQuery(t *testing.T) {
 	}
 }
 
+func TestRenderListRecordsScope(t *testing.T) {
+	s := New(resource.NewRegistry())
+	res := fakeScopedResource{fakeResource: fakeResource{name: "runs"}}
+
+	s.renderList(res, "task-1", false)
+
+	if s.currentListScope != "task-1" {
+		t.Fatalf("expected currentListScope %q, got %q", "task-1", s.currentListScope)
+	}
+}
+
+func TestRenderListClearsScopeForUnscopedList(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentListScope = "stale"
+	res := fakeResource{name: "workerpools"}
+
+	s.renderList(res, "", false)
+
+	if s.currentListScope != "" {
+		t.Fatalf("expected empty currentListScope, got %q", s.currentListScope)
+	}
+}
+
 func TestRenderListDefaultsToEmptyFilterQueryWhenNeverSet(t *testing.T) {
 	s := New(resource.NewRegistry())
 	res := fakeResource{name: "workerpools"}
@@ -206,6 +229,20 @@ func TestRefreshTableShowsActiveFilterInTitle(t *testing.T) {
 	s.refreshTable()
 	if got, want := s.content.GetTitle(), "[ Taskcluster :: workerpools ]"; got != want {
 		t.Fatalf("title with cleared filter = %q, want %q", got, want)
+	}
+}
+
+func TestRefreshTableShowsScopeInTitle(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentListResource = "runs"
+	s.currentListScope = "task-1"
+	s.currentColumns = []resource.Column{{Title: "RUN"}}
+	s.lastRows = []resource.Row{{ID: "task-1/0", Cells: []string{"0"}}}
+
+	s.refreshTable()
+
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: runs (task-1) ]"; got != want {
+		t.Fatalf("title with scope = %q, want %q", got, want)
 	}
 }
 
