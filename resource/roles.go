@@ -45,12 +45,12 @@ func (r *RolesResource) Describe(id string) (Detail, error) {
 	}
 
 	body := fmt.Sprintf(
-		"[green]Description:[white] %s\n\n[green]Created:[white] %s\n"+
-			"[green]Last Modified:[white] %s\n\n[green]Scopes (%d):[white]\n\n%s"+
+		"[green]Description:[white] %s\n\n"+
+			"%s\n"+
+			"[green]Scopes (%d):[white]\n\n%s"+
 			"\n\n[green]Expanded Scopes (%d):[white]\n\n%s",
 		role.Description,
-		role.Created,
-		role.LastModified,
+		fieldRow(24, "Created", fmt.Sprint(role.Created), "Last Modified", fmt.Sprint(role.LastModified)),
 		len(role.Scopes),
 		strings.Join(role.Scopes, "\n"),
 		len(role.ExpandedScopes),

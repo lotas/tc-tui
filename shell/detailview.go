@@ -25,3 +25,13 @@ func NewDetailView() *DetailView {
 func (d *DetailView) SetData(detail resource.Detail) {
 	d.Clear().SetText(detail.Body).ScrollToBeginning()
 }
+
+// UpdateData replaces the body like SetData, but preserves the current
+// scroll position — used when refreshing the view already on screen (as
+// opposed to navigating to a new one), so a periodic auto-refresh or the
+// manual `r` key doesn't yank the reader back to the top.
+func (d *DetailView) UpdateData(detail resource.Detail) {
+	row, col := d.GetScrollOffset()
+	d.Clear().SetText(detail.Body)
+	d.ScrollTo(row, col)
+}

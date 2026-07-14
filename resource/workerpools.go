@@ -3,6 +3,7 @@ package resource
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
@@ -28,6 +29,9 @@ func (r *WorkerPoolsResource) Columns() []Column {
 		{Title: "PROVIDER", Width: 32},
 		{Title: "CAPACITY", Width: 16},
 		{Title: "REQUESTED", Width: 16},
+		{Title: "PENDING", Width: 12},
+		{Title: "CLAIMED", Width: 12},
+		{Title: "ERRORS (7D)", Width: 14},
 	}
 }
 
@@ -58,8 +62,32 @@ func (r *WorkerPoolsResource) List() ([]Row, error) {
 		return nil, err
 	}
 
+	ids := make([]string, len(pools))
+	for i, pool := range pools {
+		ids[i] = pool.WorkerPoolID
+	}
+	taskQueueCounts := r.tc.GetTaskQueueCounts(ids)
+	errorCounts, errorCountsErr := r.tc.GetWorkerPoolErrorCounts() // best-effort: a failed call leaves the whole column blank
+
 	rows := make([]Row, 0, len(pools))
 	for _, pool := range pools {
+		var pending, claimed string
+		if c, ok := taskQueueCounts[pool.WorkerPoolID]; ok {
+			if c.PendingKnown {
+				pending = fmt.Sprintf("%10d", c.Pending)
+			}
+			if c.ClaimedKnown {
+				claimed = fmt.Sprintf("%10d", c.Claimed)
+			}
+		}
+		// A pool absent from a *successful* bulk result genuinely has zero
+		// errors (the endpoint only breaks down pools that have at least
+		// one) — only a failed call as a whole leaves this column blank.
+		var errs string
+		if errorCountsErr == nil {
+			errs = fmt.Sprintf("%10d", errorCounts[pool.WorkerPoolID])
+		}
+
 		rows = append(rows, Row{
 			ID: pool.WorkerPoolID,
 			Cells: []string{
@@ -67,6 +95,9 @@ func (r *WorkerPoolsResource) List() ([]Row, error) {
 				pool.ProviderID,
 				fmt.Sprintf("%10d", pool.CurrentCapacity),
 				fmt.Sprintf("%10d", pool.RequestedCapacity),
+				pending,
+				claimed,
+				errs,
 			},
 		})
 	}
@@ -106,36 +137,33 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 		return Detail{}, err
 	}
 
+	// Best-effort summary lines: a failure in either just omits that line
+	// rather than failing the whole Detail fetch, since these are
+	// supplementary to the pool data rendered below.
+	var summary strings.Builder
+	if total, active, err := launchConfigCounts(r.tc, id); err == nil {
+		summary.WriteString(fmt.Sprintf("[green]Launch configs:[blue] %d[white] (%d archived)\n", total, total-active))
+	}
+	if count, err := r.tc.GetWorkerPoolErrorCount(id); err == nil {
+		summary.WriteString(fmt.Sprintf("[green]Errors (last 7d):[blue] %d[white]\n", count))
+	}
+
 	body := fmt.Sprintf(
 		"[green]Description:[white]\n%s\n\n"+
 			"[green]Created:[white] %s\n"+
 			"[green]Owner:[white] %s\n\n"+
-			"[green]Requested capacity:[blue] %d\n"+
-			"[green]Running capacity:[blue] %d\n"+
-			"[green]Stopped capacity:[blue] %d\n"+
-			"[green]Running count:[blue] %d\n"+
-			"[green]Stopped count:[blue] %d\n\n"+
+			"%s\n"+
+			"%s"+
+			"%s\n"+
 			"[green]Config:[white]\n%s\n\n",
 		renderMarkdown(pool.Description),
 		pool.Created,
 		pool.Owner,
-		pool.RequestedCapacity,
-		pool.RunningCapacity,
-		pool.StoppedCapacity,
-		pool.RunningCount,
-		pool.StoppedCount,
+		summary.String(),
+		fieldRow(24, "Requested capacity", fmt.Sprint(pool.RequestedCapacity), "Running capacity", fmt.Sprint(pool.RunningCapacity), "Stopped capacity", fmt.Sprint(pool.StoppedCapacity)),
+		fieldRow(24, "Running count", fmt.Sprint(pool.RunningCount), "Stopped count", fmt.Sprint(pool.StoppedCount)),
 		renderYAML(pool.Config),
 	)
-
-	// Best-effort summary lines: a failure in either just omits that line
-	// rather than failing the whole Detail fetch, since these are
-	// supplementary to the pool data already rendered above.
-	if total, active, err := launchConfigCounts(r.tc, id); err == nil {
-		body += fmt.Sprintf("[green]Launch configs:[blue] %d[white] (%d archived)\n", total, total-active)
-	}
-	if count, err := r.tc.GetWorkerPoolErrorCount(id); err == nil {
-		body += fmt.Sprintf("[green]Errors (last 7d):[blue] %d[white]\n", count)
-	}
 
 	return Detail{
 		Title:   fmt.Sprintf("Worker Pool :: %s", pool.WorkerPoolID),

@@ -71,6 +71,32 @@ func TestTaskResourceDescribe(t *testing.T) {
 	}
 }
 
+func TestTaskResourceDescribeGroupsOwnerAndSourceOnOneLine(t *testing.T) {
+	fake := &fakeTaskcluster{
+		task: &tcqueue.TaskDefinitionResponse{
+			Metadata: tcqueue.TaskMetadata{Name: "t", Owner: "owner@example.com", Source: "https://example.com/src"},
+		},
+		taskStatus: &tcqueue.TaskStatusStructure{State: "completed"},
+	}
+	res := NewTaskResource(fake)
+
+	detail, err := res.Describe("task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	body := stripRegionTags(detail.Body)
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "owner@example.com") {
+			if !strings.Contains(line, "https://example.com/src") {
+				t.Fatalf("expected Owner and Source on the same line, got: %q", line)
+			}
+			return
+		}
+	}
+	t.Fatalf("owner not found in body: %s", body)
+}
+
 // TestTaskResourceDescribeAlwaysShowsDependentsAction confirms the
 // dependents action appears even for a task with no dependencies of its own
 // — the two directions are independent (see describeTask's comment on why

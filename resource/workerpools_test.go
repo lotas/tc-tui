@@ -41,6 +41,101 @@ func TestWorkerPoolsResourceList(t *testing.T) {
 	}
 }
 
+func TestWorkerPoolsResourceListIncludesPendingClaimedErrorsColumns(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workerPools: taskcluster.WorkerPoolList{
+			{WorkerPoolID: "proj/pool-a", ProviderID: "gcp"},
+		},
+		taskQueueCounts: map[string]taskcluster.TaskQueueCounts{
+			"proj/pool-a": {Pending: 7, PendingKnown: true, Claimed: 3, ClaimedKnown: true},
+		},
+		workerPoolErrorCounts: map[string]int{"proj/pool-a": 2},
+	}
+	res := NewWorkerPoolsResource(fake)
+
+	rows, err := res.List()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows[0].Cells) != 7 {
+		t.Fatalf("expected 7 cells, got %d: %+v", len(rows[0].Cells), rows[0].Cells)
+	}
+	if strings.TrimSpace(rows[0].Cells[4]) != "7" || strings.TrimSpace(rows[0].Cells[5]) != "3" ||
+		strings.TrimSpace(rows[0].Cells[6]) != "2" {
+		t.Fatalf("unexpected pending/claimed/errors cells: %+v", rows[0].Cells)
+	}
+}
+
+// TestWorkerPoolsResourceListLeavesClaimedBlankWhenOnlyPendingFallbackSucceeded
+// covers GetTaskQueueCounts's fallback path (TaskQueueCounts requires both
+// pending-count and claimed-count scopes; a credential with only one falls
+// back to the pending-only endpoint, and separately to counting
+// GetClaimedTasks for Claimed) — a number that couldn't be obtained by any
+// path must render blank, not "0", since the zero value must not be
+// mistaken for a genuine count.
+func TestWorkerPoolsResourceListLeavesClaimedBlankWhenOnlyPendingFallbackSucceeded(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workerPools: taskcluster.WorkerPoolList{
+			{WorkerPoolID: "proj/pool-a", ProviderID: "gcp"},
+		},
+		taskQueueCounts: map[string]taskcluster.TaskQueueCounts{
+			"proj/pool-a": {Pending: 7, PendingKnown: true}, // ClaimedKnown left false, as the real fallback produces
+		},
+	}
+	res := NewWorkerPoolsResource(fake)
+
+	rows, err := res.List()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(rows[0].Cells[4]) != "7" {
+		t.Fatalf("expected pending to still show up, got %q", rows[0].Cells[4])
+	}
+	if strings.TrimSpace(rows[0].Cells[5]) != "" {
+		t.Fatalf("expected claimed to be blank (unknown), got %q", rows[0].Cells[5])
+	}
+}
+
+func TestWorkerPoolsResourceListLeavesColumnsBlankWhenCountsMissing(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workerPools: taskcluster.WorkerPoolList{
+			{WorkerPoolID: "proj/pool-a", ProviderID: "gcp"},
+		},
+		workerPoolErrorCountsErr: errors.New("boom"),
+	}
+	res := NewWorkerPoolsResource(fake)
+
+	rows, err := res.List()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(rows[0].Cells[4]) != "" || strings.TrimSpace(rows[0].Cells[5]) != "" ||
+		strings.TrimSpace(rows[0].Cells[6]) != "" {
+		t.Fatalf("expected blank pending/claimed/errors cells on missing/error data, got: %+v", rows[0].Cells)
+	}
+}
+
+func TestWorkerPoolsResourceListRendersZeroErrorsForPoolAbsentFromSuccessfulBulkResult(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workerPools: taskcluster.WorkerPoolList{
+			{WorkerPoolID: "proj/pool-a", ProviderID: "gcp"},
+		},
+		// workerPoolErrorCounts succeeds (no error) but simply omits
+		// pool-a, exactly like the real bulk endpoint omitting any pool
+		// with zero errors in its per-pool breakdown.
+		workerPoolErrorCounts: map[string]int{},
+	}
+	res := NewWorkerPoolsResource(fake)
+
+	rows, err := res.List()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(rows[0].Cells[6]) != "0" {
+		t.Fatalf("expected a pool absent from a successful bulk result to render 0 errors, got %q", rows[0].Cells[6])
+	}
+}
+
 func TestWorkerPoolsResourceListError(t *testing.T) {
 	wantErr := errors.New("boom")
 	fake := &fakeTaskcluster{workerPoolsErr: wantErr}
@@ -113,6 +208,35 @@ func TestWorkerPoolsResourceDescribe(t *testing.T) {
 	}
 	if !strings.Contains(detail.Body, "Errors (last 7d):[blue] 4[white]") {
 		t.Fatalf("unexpected body: %s", detail.Body)
+	}
+}
+
+func TestWorkerPoolsResourceDescribeSummaryLinesComeBeforeConfig(t *testing.T) {
+	fake := &fakeTaskcluster{
+		workerPool: &tcworkermanager.WorkerPoolFullDefinition{
+			WorkerPoolID: "proj/pool-a",
+			Config:       []byte(`{"minCapacity":1}`),
+		},
+		launchConfigs: taskcluster.WorkerPoolLaunchConfigList{
+			{LaunchConfigID: "lc-1", IsArchived: false},
+		},
+		errorCount: 2,
+	}
+	res := NewWorkerPoolsResource(fake)
+
+	detail, err := res.Describe("proj/pool-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	launchConfigsIdx := strings.Index(detail.Body, "Launch configs:")
+	errorsIdx := strings.Index(detail.Body, "Errors (last 7d):")
+	configIdx := strings.Index(detail.Body, "Config:")
+	if launchConfigsIdx == -1 || errorsIdx == -1 || configIdx == -1 {
+		t.Fatalf("expected all three sections present, got body: %s", detail.Body)
+	}
+	if !(launchConfigsIdx < configIdx && errorsIdx < configIdx) {
+		t.Fatalf("expected Launch configs/Errors summary before Config, got body: %s", detail.Body)
 	}
 }
 

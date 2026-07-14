@@ -142,13 +142,9 @@ func (r *LaunchConfigsResource) Describe(id string) (Detail, error) {
 		}
 
 		body := fmt.Sprintf(
-			"[green]Created:[white] %s\n"+
-				"[green]Last Modified:[white] %s\n"+
-				"[green]Archived:[white] %t\n\n"+
+			"%s\n"+
 				"[green]Configuration:[white]\n%s\n\n",
-			c.Created,
-			c.LastModified,
-			c.IsArchived,
+			fieldRow(30, "Created", fmt.Sprint(c.Created), "Last Modified", fmt.Sprint(c.LastModified), "Archived", fmt.Sprintf("%t", c.IsArchived)),
 			renderYAML(c.Configuration),
 		)
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
@@ -36,6 +37,8 @@ type Taskcluster interface {
 	GetRole(roleID string) (*tcauth.GetRoleResponse, error)
 	GetWorkerPools() (WorkerPoolList, error)
 	GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error)
+	GetTaskQueueCounts(workerPoolIDs []string) map[string]TaskQueueCounts
+	GetWorkerPoolErrorCounts() (map[string]int, error)
 	GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (WorkerList, error)
 	GetWorkerPoolStateCounts(workerPoolID, launchConfigID string) (map[string]int, error)
 	GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error)
@@ -179,6 +182,105 @@ func (tc *TC) GetWorkerPools() (WorkerPoolList, error) {
 
 func (tc *TC) GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error) {
 	return tc.wm.WorkerPool(workerPoolID)
+}
+
+// TaskQueueCounts holds a task queue's approximate pending/claimed task
+// counts. PendingKnown/ClaimedKnown are false when even GetTaskQueueCounts's
+// fallback paths (see its doc comment) couldn't obtain that particular
+// number — the zero value must not be mistaken for a genuine zero count.
+type TaskQueueCounts struct {
+	Pending      int64
+	PendingKnown bool
+	Claimed      int64
+	ClaimedKnown bool
+}
+
+// GetTaskQueueCounts fetches pending/claimed counts for each of
+// workerPoolIDs concurrently — a worker pool's ID doubles as its task
+// queue's ID, and there is no bulk variant of this endpoint (Taskcluster's
+// own web UI fetches it the same way: one call per pool, batched
+// concurrently rather than sequentially). This is a best-effort list
+// enrichment, not core data, so it never fails as a whole — a pool with
+// neither number obtainable is simply omitted from the result.
+//
+// TaskQueueCounts (the combined, ideal call) requires both
+// queue:pending-count and queue:claimed-count scopes together, so a
+// credential granted only one of the two (as observed with community-tc's
+// anonymous role, which grants queue:claimed-list but apparently not
+// queue:claimed-count) fails the combined call entirely. Each number then
+// falls back independently to an older, more narrowly-scoped call: Pending
+// to the deprecated pending-count-only endpoint, Claimed to counting
+// GetClaimedTasks's result (the same queue:claimed-list-scoped call the
+// existing "claimed" list view already uses successfully) — an approximate
+// but perfectly serviceable substitute for a single summary column, given
+// currently-claimed tasks are bounded by worker capacity rather than an
+// unbounded backlog.
+func (tc *TC) GetTaskQueueCounts(workerPoolIDs []string) map[string]TaskQueueCounts {
+	const maxConcurrency = 8
+
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, maxConcurrency)
+		results = make(map[string]TaskQueueCounts, len(workerPoolIDs))
+	)
+
+	for _, id := range workerPoolIDs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(id string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if counts, err := tc.queue.TaskQueueCounts(id); err == nil {
+				mu.Lock()
+				results[id] = TaskQueueCounts{
+					Pending: counts.PendingTasks, PendingKnown: true,
+					Claimed: counts.ClaimedTasks, ClaimedKnown: true,
+				}
+				mu.Unlock()
+				return
+			}
+
+			var result TaskQueueCounts
+			if pending, err := tc.queue.PendingTasks(id); err == nil {
+				result.Pending, result.PendingKnown = pending.PendingTasks, true
+			}
+			if claimed, err := tc.GetClaimedTasks(id); err == nil {
+				result.Claimed, result.ClaimedKnown = int64(len(claimed)), true
+			}
+
+			if result.PendingKnown || result.ClaimedKnown {
+				mu.Lock()
+				results[id] = result
+				mu.Unlock()
+			}
+		}(id)
+	}
+
+	wg.Wait()
+	return results
+}
+
+// GetWorkerPoolErrorCounts returns each worker pool's error count over the
+// last 7 days in one bulk call (workerPoolErrorStats with no workerPoolId
+// filter), keyed by worker pool ID.
+func (tc *TC) GetWorkerPoolErrorCounts() (map[string]int, error) {
+	stats, err := tc.wm.WorkerPoolErrorStats("")
+	if err != nil {
+		return nil, err
+	}
+
+	var byPool map[string]float64
+	if err := json.Unmarshal(stats.Totals.WorkerPool, &byPool); err != nil {
+		return nil, err
+	}
+
+	counts := make(map[string]int, len(byPool))
+	for id, n := range byPool {
+		counts[id] = int(n)
+	}
+	return counts, nil
 }
 
 func (tc *TC) GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (WorkerList, error) {

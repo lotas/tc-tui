@@ -522,7 +522,11 @@ func (s *Shell) loadDetail(res resource.Resource, id string, isInitial, isRestor
 				return
 			}
 
-			s.detail.SetData(detail)
+			if isInitial {
+				s.detail.SetData(detail)
+			} else {
+				s.detail.UpdateData(detail)
+			}
 			s.currentDetailActions = detail.Actions
 			s.activeContent = s.detail
 			s.setTitle(detail.Title)

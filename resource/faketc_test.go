@@ -36,6 +36,11 @@ type fakeTaskcluster struct {
 	workerPool     *tcworkermanager.WorkerPoolFullDefinition
 	workerPoolErr  error
 
+	taskQueueCounts map[string]taskcluster.TaskQueueCounts
+
+	workerPoolErrorCounts    map[string]int
+	workerPoolErrorCountsErr error
+
 	workers               taskcluster.WorkerList
 	workersErr            error
 	workersState          string // last `state` param GetWorkersForWorkerPool was called with
@@ -109,6 +114,14 @@ func (f *fakeTaskcluster) GetWorkerPools() (taskcluster.WorkerPoolList, error) {
 
 func (f *fakeTaskcluster) GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error) {
 	return f.workerPool, f.workerPoolErr
+}
+
+func (f *fakeTaskcluster) GetTaskQueueCounts(workerPoolIDs []string) map[string]taskcluster.TaskQueueCounts {
+	return f.taskQueueCounts
+}
+
+func (f *fakeTaskcluster) GetWorkerPoolErrorCounts() (map[string]int, error) {
+	return f.workerPoolErrorCounts, f.workerPoolErrorCountsErr
 }
 
 func (f *fakeTaskcluster) GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (taskcluster.WorkerList, error) {

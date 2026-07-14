@@ -175,6 +175,34 @@ func TestLaunchConfigsResourceDescribe(t *testing.T) {
 	}
 }
 
+func TestLaunchConfigsResourceDescribeGroupsCreatedModifiedArchivedOnOneLine(t *testing.T) {
+	fake := &fakeTaskcluster{
+		launchConfigs: taskcluster.WorkerPoolLaunchConfigList{
+			{WorkerPoolID: "gcp/pool-a", LaunchConfigID: "lc-1", IsArchived: true},
+		},
+	}
+	res := NewLaunchConfigsResource(fake)
+
+	detail, err := res.Describe("gcp/pool-a::lc-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	body := stripRegionTags(detail.Body)
+	found := false
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "Archived") {
+			found = true
+			if !strings.Contains(line, "Created") || !strings.Contains(line, "Last Modified") {
+				t.Fatalf("expected Created/Last Modified/Archived on the same line, got: %q", line)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("Archived not found in body: %s", body)
+	}
+}
+
 func TestLaunchConfigsResourceDescribeNotFound(t *testing.T) {
 	fake := &fakeTaskcluster{launchConfigs: taskcluster.WorkerPoolLaunchConfigList{}}
 	res := NewLaunchConfigsResource(fake)

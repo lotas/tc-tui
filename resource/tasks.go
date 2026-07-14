@@ -177,32 +177,22 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 	body := fmt.Sprintf(
 		"[green]Name:[white] %s\n"+
 			"[green]Description:[white]\n%s\n\n"+
-			"[green]Owner:[white] %s\n"+
-			"[green]Source:[white] %s\n\n"+
+			"%s\n"+
 			"[green]State:[blue] %s[white]\n"+
-			"[green]Provisioner:[white] %s\n"+
-			"[green]Worker Type:[white] %s\n"+
-			"[green]Priority:[white] %s\n\n"+
+			"%s\n"+
 			"[green]Payload:[white]\n%s\n\n"+
-			"[green]Created:[white] %s\n"+
-			"[green]Deadline:[white] %s\n"+
-			"[green]Expires:[white] %s\n\n"+
+			"%s\n"+
 			"[green]Retries Left:[blue] %d[white]\n"+
 			"[green]Dependencies (%d):[white]\n%s\n\n"+
 			"[green]Scopes (%d):[white]\n%s\n\n"+
 			"[green]Runs:[white]\n%s",
 		task.Metadata.Name,
 		renderMarkdown(task.Metadata.Description),
-		task.Metadata.Owner,
-		task.Metadata.Source,
+		fieldRow(32, "Owner", task.Metadata.Owner, "Source", task.Metadata.Source),
 		status.State,
-		task.ProvisionerID,
-		task.WorkerType,
-		task.Priority,
+		fieldRow(24, "Provisioner", task.ProvisionerID, "Worker Type", task.WorkerType, "Priority", task.Priority),
 		renderYAML(task.Payload),
-		task.Created,
-		task.Deadline,
-		task.Expires,
+		fieldRow(30, "Created", fmt.Sprint(task.Created), "Deadline", fmt.Sprint(task.Deadline), "Expires", fmt.Sprint(task.Expires)),
 		status.RetriesLeft,
 		len(task.Dependencies),
 		strings.Join(task.Dependencies, "\n"),

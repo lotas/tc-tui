@@ -69,6 +69,27 @@ func TestRolesResourceDescribe(t *testing.T) {
 	}
 }
 
+func TestRolesResourceDescribeGroupsCreatedAndLastModifiedOnOneLine(t *testing.T) {
+	fake := &fakeTaskcluster{role: &tcauth.GetRoleResponse{RoleID: "role-1"}}
+	res := NewRolesResource(fake)
+
+	detail, err := res.Describe("role-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	body := stripRegionTags(detail.Body)
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "Created") {
+			if !strings.Contains(line, "Last Modified") {
+				t.Fatalf("expected Created and Last Modified on the same line, got: %q", line)
+			}
+			return
+		}
+	}
+	t.Fatalf("Created not found in body: %s", body)
+}
+
 func TestRolesResourceDescribeError(t *testing.T) {
 	wantErr := errors.New("boom")
 	fake := &fakeTaskcluster{roleErr: wantErr}
