@@ -31,13 +31,27 @@ func (s *Shell) switchResource(nameOrAlias, scope string) {
 		return
 	}
 
-	if scoped, isScoped := res.(resource.ScopedResource); isScoped && scope == "" {
-		s.switchResource(scoped.EmptyScopeResource(), "")
+	if scoped, isScoped := res.(resource.ScopedResource); isScoped {
+		if scope == "" {
+			s.switchResource(scoped.EmptyScopeResource(), "")
+			return
+		}
+		s.stack.ResetTo(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope})
+		s.renderList(res, scope, false)
 		return
 	}
 
-	s.stack.ResetTo(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope})
-	s.renderList(res, scope, false)
+	// res is a plain Resource: no ScopedList, no DirectLookup. A second
+	// argument here can only mean "open this id directly" (e.g. `:workerpools
+	// proj-taskcluster/ci`) — res.List() takes no scope, so there's no scoped
+	// list this could otherwise mean.
+	if scope != "" {
+		s.switchToDetail(res, scope)
+		return
+	}
+
+	s.stack.ResetTo(View{ResourceName: res.Name(), Kind: ListKind})
+	s.renderList(res, "", false)
 }
 
 // switchToDetail resets the navigation stack to a Detail view for res/id —

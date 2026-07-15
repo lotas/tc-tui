@@ -711,6 +711,37 @@ func TestSwitchResourceDirectLookupWithIDGoesStraightToDetail(t *testing.T) {
 	}
 }
 
+func TestSwitchResourcePlainResourceWithIDGoesStraightToDetail(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: "workerpools", aliases: []string{"wp"}})
+	s := New(registry)
+
+	// workerpools has a List() and a Describe(id), but is neither a
+	// ScopedResource nor a DirectLookup — `:wp proj-taskcluster/ci` used to
+	// error ("does not support a scoped list") because switchResource fell
+	// through to the scoped-list branch. It should instead be treated the
+	// same as a DirectLookup id: open that entity's Detail view directly.
+	s.switchResource("wp", "proj-taskcluster/ci")
+
+	top, ok := s.stack.Top()
+	if !ok || top.Kind != DetailKind || top.SelectedID != "proj-taskcluster/ci" || top.ResourceName != "workerpools" {
+		t.Fatalf("unexpected top view: %+v (ok=%v)", top, ok)
+	}
+}
+
+func TestSwitchResourcePlainResourceWithoutIDShowsUnscopedList(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: "workerpools", aliases: []string{"wp"}})
+	s := New(registry)
+
+	s.switchResource("wp", "")
+
+	top, ok := s.stack.Top()
+	if !ok || top.Kind != ListKind || top.Scope != "" || top.ResourceName != "workerpools" {
+		t.Fatalf("unexpected top view: %+v (ok=%v)", top, ok)
+	}
+}
+
 func TestSwitchResourceDirectLookupWithoutIDOpensPrompt(t *testing.T) {
 	registry := resource.NewRegistry()
 	registry.Register(fakeDirectLookupResource{

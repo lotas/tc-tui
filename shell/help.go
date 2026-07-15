@@ -84,6 +84,10 @@ func buildHelpText(registry *resource.Registry) string {
 				"      requires a scope, e.g. `:%s <id>` — no scope redirects to `%s`\n",
 				res.Name(), scoped.EmptyScopeResource(),
 			))
+		} else {
+			b.WriteString(fmt.Sprintf(
+				"      can also be opened directly by id, e.g. `:%s <id>`\n", res.Name(),
+			))
 		}
 
 		switch faceted := res.(type) {
