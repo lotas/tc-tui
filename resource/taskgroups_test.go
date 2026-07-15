@@ -2,45 +2,67 @@ package resource
 
 import (
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	tcclient "github.com/taskcluster/taskcluster/v101/clients/client-go"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
+
+	"github.com/taskcluster/tc-tui/taskcluster"
 )
 
-func TestTaskGroupResourceDescribe(t *testing.T) {
+func TestTaskGroupResourceScopedList(t *testing.T) {
 	fake := &fakeTaskcluster{
-		taskGroup: &tcqueue.TaskGroupDefinitionResponse{
-			TaskGroupID: "grp-1",
-			SchedulerID: "taskcluster-github",
-			Expires:     tcclient.Time(time.Now()),
+		taskGroupTasks: taskcluster.TaskGroupTaskList{
+			{
+				Status: tcqueue.TaskStatusStructure{TaskID: "task-1", State: "pending"},
+				Task: tcqueue.TaskDefinitionResponse{
+					Metadata:      tcqueue.TaskMetadata{Name: "build"},
+					ProvisionerID: "gcp",
+					WorkerType:    "linux-b-large",
+					Created:       tcclient.Time(time.Now().Add(-time.Hour)),
+				},
+			},
 		},
 	}
 	res := NewTaskGroupResource(fake)
 
-	detail, err := res.Describe("grp-1")
+	rows, err := res.ScopedList("grp-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if detail.Title != "Task Group :: grp-1" {
-		t.Fatalf("unexpected title: %s", detail.Title)
-	}
-	if !strings.Contains(detail.Body, "taskcluster-github") || !strings.Contains(detail.Body, "not sealed") {
-		t.Fatalf("unexpected body: %s", detail.Body)
-	}
-	if len(detail.Actions) != 1 {
-		t.Fatalf("expected 1 action, got %d", len(detail.Actions))
-	}
-	action := detail.Actions[0]
-	if action.Key != 't' || action.Target.ResourceName != "tasks" ||
-		action.Target.ID != "grp-1" || action.Target.Kind != NavScopedList {
-		t.Fatalf("unexpected action: %+v", action)
+	if len(rows) != 1 || rows[0].ID != "task-1" {
+		t.Fatalf("unexpected rows: %+v", rows)
 	}
 }
 
-func TestTaskGroupResourceDescribeSealed(t *testing.T) {
+func TestTaskGroupResourceScopedListError(t *testing.T) {
+	wantErr := errors.New("boom")
+	fake := &fakeTaskcluster{taskGroupTasksErr: wantErr}
+	res := NewTaskGroupResource(fake)
+
+	_, err := res.ScopedList("grp-1")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+}
+
+func TestTaskGroupResourceSubtitleNotSealed(t *testing.T) {
+	fake := &fakeTaskcluster{
+		taskGroup: &tcqueue.TaskGroupDefinitionResponse{TaskGroupID: "grp-1"},
+	}
+	res := NewTaskGroupResource(fake)
+
+	subtitle, err := res.Subtitle("grp-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if subtitle != "not sealed" {
+		t.Fatalf("unexpected subtitle: %q", subtitle)
+	}
+}
+
+func TestTaskGroupResourceSubtitleSealed(t *testing.T) {
 	fake := &fakeTaskcluster{
 		taskGroup: &tcqueue.TaskGroupDefinitionResponse{
 			TaskGroupID: "grp-1",
@@ -49,21 +71,21 @@ func TestTaskGroupResourceDescribeSealed(t *testing.T) {
 	}
 	res := NewTaskGroupResource(fake)
 
-	detail, err := res.Describe("grp-1")
+	subtitle, err := res.Subtitle("grp-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(detail.Body, "not sealed") {
-		t.Fatalf("expected a sealed timestamp, got: %s", detail.Body)
+	if subtitle == "not sealed" || subtitle == "" {
+		t.Fatalf("expected a sealed subtitle, got %q", subtitle)
 	}
 }
 
-func TestTaskGroupResourceDescribeError(t *testing.T) {
+func TestTaskGroupResourceSubtitleError(t *testing.T) {
 	wantErr := errors.New("boom")
 	fake := &fakeTaskcluster{taskGroupErr: wantErr}
 	res := NewTaskGroupResource(fake)
 
-	_, err := res.Describe("grp-1")
+	_, err := res.Subtitle("grp-1")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected %v, got %v", wantErr, err)
 	}
@@ -82,5 +104,13 @@ func TestTaskGroupResourceIDPromptLabel(t *testing.T) {
 
 	if got := res.IDPromptLabel(); got != "task group id" {
 		t.Fatalf("expected %q, got %q", "task group id", got)
+	}
+}
+
+func TestTaskGroupResourceEmptyScopeResource(t *testing.T) {
+	res := NewTaskGroupResource(&fakeTaskcluster{})
+
+	if got := res.EmptyScopeResource(); got != "workerpools" {
+		t.Fatalf("expected %q, got %q", "workerpools", got)
 	}
 }

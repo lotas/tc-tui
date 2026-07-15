@@ -195,7 +195,7 @@ func TestApplyListResultBumpsAugmentEpoch(t *testing.T) {
 	s := newTestShellForSort()
 	before := s.augmentEpoch
 
-	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil)
+	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil, "")
 
 	if s.augmentEpoch != before+1 {
 		t.Fatalf("expected augmentEpoch to increment by exactly 1, got %d (was %d)", s.augmentEpoch, before)
@@ -206,7 +206,7 @@ func TestApplyListResultResetsAugmentProgress(t *testing.T) {
 	s := newTestShellForSort()
 	s.augmentCompleted, s.augmentTotal = 3, 10
 
-	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil)
+	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil, "")
 
 	if s.augmentCompleted != 0 || s.augmentTotal != 0 {
 		t.Fatalf("expected progress reset to 0/0, got %d/%d", s.augmentCompleted, s.augmentTotal)
@@ -243,6 +243,21 @@ func TestRefreshTableShowsScopeInTitle(t *testing.T) {
 
 	if got, want := s.content.GetTitle(), "[ Taskcluster :: runs (task-1) ]"; got != want {
 		t.Fatalf("title with scope = %q, want %q", got, want)
+	}
+}
+
+func TestRefreshTableShowsScopeSubtitleInTitle(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentListResource = "taskgroup"
+	s.currentListScope = "grp-1"
+	s.currentScopeSubtitle = "not sealed"
+	s.currentColumns = []resource.Column{{Title: "TASK ID"}}
+	s.lastRows = []resource.Row{{ID: "task-1", Cells: []string{"task-1"}}}
+
+	s.refreshTable()
+
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: taskgroup (grp-1) [not sealed] ]"; got != want {
+		t.Fatalf("title with scope subtitle = %q, want %q", got, want)
 	}
 }
 
@@ -638,6 +653,66 @@ func TestLoadListRecordsScopedVisitOnSuccessfulCacheHit(t *testing.T) {
 	}
 }
 
+func TestLoadListAppliesCachedScopeSubtitle(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+
+	res := fakeScopedTTLResource{fakeResource: fakeResource{name: "taskgroup"}, ttl: time.Minute}
+	s.cache.set(cacheKeyFor(res, "grp-1", ""), cacheEntry{
+		rows:      []resource.Row{{ID: "task-1", Cells: []string{"task-1"}}},
+		subtitle:  "not sealed",
+		fetchedAt: time.Now(),
+	})
+
+	s.loadList(res, "grp-1", "", true, false, false)
+
+	if s.currentScopeSubtitle != "not sealed" {
+		t.Fatalf("expected cached subtitle applied, got %q", s.currentScopeSubtitle)
+	}
+}
+
+// fakeScopeSubtitleTrackingResource is a ScopedResource + ScopeSubtitle with
+// thread-safe call tracking, needed to observe (from the polling test
+// goroutine) that loadList's background fetch actually calls Subtitle —
+// s.app is never Run() in these tests, so the QueueUpdateDraw callback that
+// would apply the result never executes; only side effects before that
+// point are observable (see waitFor's doc comment).
+type fakeScopeSubtitleTrackingResource struct {
+	fakeResource
+	ttl time.Duration
+
+	mu     sync.Mutex
+	called bool
+}
+
+func (f *fakeScopeSubtitleTrackingResource) RefreshInterval() time.Duration { return f.ttl }
+func (f *fakeScopeSubtitleTrackingResource) ScopedList(scope string) ([]resource.Row, error) {
+	return nil, nil
+}
+func (f *fakeScopeSubtitleTrackingResource) EmptyScopeResource() string { return "" }
+func (f *fakeScopeSubtitleTrackingResource) Subtitle(scope string) (string, error) {
+	f.mu.Lock()
+	f.called = true
+	f.mu.Unlock()
+	return "not sealed", nil
+}
+func (f *fakeScopeSubtitleTrackingResource) wasCalled() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.called
+}
+
+func TestLoadListFetchesScopeSubtitleAlongsideRows(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+
+	res := &fakeScopeSubtitleTrackingResource{fakeResource: fakeResource{name: "taskgroup"}, ttl: time.Minute}
+
+	s.loadList(res, "grp-1", "", true, false, false)
+
+	waitFor(t, res.wasCalled)
+}
+
 func TestLoadListDoesNotRecordUnscopedVisit(t *testing.T) {
 	s := New(resource.NewRegistry())
 	rec := &fakeHistoryRecorder{}
@@ -742,6 +817,50 @@ func TestSwitchResourcePlainResourceWithoutIDShowsUnscopedList(t *testing.T) {
 	}
 }
 
+func TestSwitchResourceDirectScopedResourceWithIDPushesScopedList(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeDirectScopedResource{
+		fakeScopedResource: fakeScopedResource{fakeResource: fakeResource{name: "taskgroup"}},
+		label:              "task group id",
+	})
+	s := New(registry)
+
+	s.switchResource("taskgroup", "grp-1")
+
+	top, ok := s.stack.Top()
+	if !ok || top.Kind != ListKind || top.Scope != "grp-1" || top.ResourceName != "taskgroup" {
+		t.Fatalf("unexpected top view: %+v (ok=%v)", top, ok)
+	}
+}
+
+func TestSwitchResourceDirectScopedResourceWithoutIDOpensPrompt(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeDirectScopedResource{
+		fakeScopedResource: fakeScopedResource{fakeResource: fakeResource{name: "taskgroup"}},
+		label:              "task group id",
+	})
+	s := New(registry)
+
+	s.switchResource("taskgroup", "")
+
+	if s.footerMode != footerPrompt {
+		t.Fatalf("expected footerMode footerPrompt, got %v", s.footerMode)
+	}
+	if got, want := s.footerInput.GetLabel(), "[yellow]task group id:[white] "; got != want {
+		t.Fatalf("expected footer label %q, got %q", want, got)
+	}
+
+	// Entering an id in the prompt should push the scoped List view, not a
+	// Detail view (unlike a plain DirectLookup's prompt).
+	s.footerInput.SetText("grp-1")
+	s.handleFooterInputDone(tcell.KeyEnter)
+
+	top, ok := s.stack.Top()
+	if !ok || top.Kind != ListKind || top.Scope != "grp-1" || top.ResourceName != "taskgroup" {
+		t.Fatalf("unexpected top view: %+v (ok=%v)", top, ok)
+	}
+}
+
 func TestSwitchResourceDirectLookupWithoutIDOpensPrompt(t *testing.T) {
 	registry := resource.NewRegistry()
 	registry.Register(fakeDirectLookupResource{
@@ -755,8 +874,11 @@ func TestSwitchResourceDirectLookupWithoutIDOpensPrompt(t *testing.T) {
 	if s.footerMode != footerPrompt {
 		t.Fatalf("expected footerMode footerPrompt, got %v", s.footerMode)
 	}
-	if s.pendingLookup == nil || s.pendingLookup.Name() != "task" {
-		t.Fatalf("expected pendingLookup set to the task resource, got %+v", s.pendingLookup)
+	if s.pendingLookupCommit == nil {
+		t.Fatalf("expected pendingLookupCommit to be set")
+	}
+	if got, want := s.footerInput.GetLabel(), "[yellow]task id:[white] "; got != want {
+		t.Fatalf("expected footer label %q, got %q", want, got)
 	}
 }
 

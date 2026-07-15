@@ -103,6 +103,25 @@ type ScopedResource interface {
 	EmptyScopeResource() string // resource name to show when no scope is given
 }
 
+// DirectScopedResource is a ScopedResource that's reached by looking its
+// scope up directly by ID (e.g. a task group ID pasted from a URL or log)
+// rather than by drilling down from a parent list. The shell prompts for an
+// ID exactly like DirectLookup, but treats what's entered as this resource's
+// scope — pushing its List view — instead of an entity to Describe.
+type DirectScopedResource interface {
+	ScopedResource
+	IDPromptLabel() string
+}
+
+// ScopeSubtitle is implemented by a ScopedResource whose List view wants
+// extra static context about its scope surfaced in the title bar (e.g. a
+// task group's sealed status) — fetched once alongside the scoped list
+// itself, in addition to (not instead of) its normal rows.
+type ScopeSubtitle interface {
+	ScopedResource
+	Subtitle(scope string) (string, error)
+}
+
 // DirectLookup is implemented by resources with no meaningful list at all —
 // every entity is addressed directly by its own ID (e.g. a single task or a
 // task group; Taskcluster's Queue API has no "list all tasks"/"list all task

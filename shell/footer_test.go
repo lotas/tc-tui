@@ -186,7 +186,7 @@ func TestHandleFooterInputDonePromptWithIDNavigatesAndCloses(t *testing.T) {
 	s := New(resource.NewRegistry())
 	res := fakeDirectLookupResource{fakeResource: fakeResource{name: "task"}, label: "task id"}
 	s.footerMode = footerPrompt
-	s.pendingLookup = res
+	s.pendingLookupCommit = func(id string) { s.switchToDetail(res, id) }
 	s.footerInput.SetText("task-1")
 
 	s.handleFooterInputDone(tcell.KeyEnter)
@@ -194,8 +194,8 @@ func TestHandleFooterInputDonePromptWithIDNavigatesAndCloses(t *testing.T) {
 	if s.footerMode != footerIdle {
 		t.Fatalf("expected footer to close, got mode %v", s.footerMode)
 	}
-	if s.pendingLookup != nil {
-		t.Fatalf("expected pendingLookup cleared, got %+v", s.pendingLookup)
+	if s.pendingLookupCommit != nil {
+		t.Fatalf("expected pendingLookupCommit cleared, got non-nil")
 	}
 	top, ok := s.stack.Top()
 	if !ok || top.Kind != DetailKind || top.SelectedID != "task-1" || top.ResourceName != "task" {
@@ -205,9 +205,8 @@ func TestHandleFooterInputDonePromptWithIDNavigatesAndCloses(t *testing.T) {
 
 func TestHandleFooterInputDonePromptWithEmptyTextStaysOpen(t *testing.T) {
 	s := New(resource.NewRegistry())
-	res := fakeDirectLookupResource{fakeResource: fakeResource{name: "task"}, label: "task id"}
 	s.footerMode = footerPrompt
-	s.pendingLookup = res
+	s.pendingLookupCommit = func(id string) { t.Fatalf("commit should not be called for empty text") }
 	s.footerInput.SetText("   ")
 
 	s.handleFooterInputDone(tcell.KeyEnter)
@@ -215,24 +214,23 @@ func TestHandleFooterInputDonePromptWithEmptyTextStaysOpen(t *testing.T) {
 	if s.footerMode != footerPrompt {
 		t.Fatalf("expected prompt to stay open, got mode %v", s.footerMode)
 	}
-	if s.pendingLookup == nil {
-		t.Fatalf("expected pendingLookup to remain set")
+	if s.pendingLookupCommit == nil {
+		t.Fatalf("expected pendingLookupCommit to remain set")
 	}
 }
 
 func TestHandleFooterInputDonePromptEscapeCancels(t *testing.T) {
 	s := New(resource.NewRegistry())
-	res := fakeDirectLookupResource{fakeResource: fakeResource{name: "task"}, label: "task id"}
 	s.footerMode = footerPrompt
-	s.pendingLookup = res
+	s.pendingLookupCommit = func(id string) {}
 
 	s.handleFooterInputDone(tcell.KeyEscape)
 
 	if s.footerMode != footerIdle {
 		t.Fatalf("expected footer to close, got mode %v", s.footerMode)
 	}
-	if s.pendingLookup != nil {
-		t.Fatalf("expected pendingLookup cleared, got %+v", s.pendingLookup)
+	if s.pendingLookupCommit != nil {
+		t.Fatalf("expected pendingLookupCommit cleared, got non-nil")
 	}
 }
 

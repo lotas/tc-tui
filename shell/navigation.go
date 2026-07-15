@@ -22,9 +22,28 @@ func (s *Shell) switchResource(nameOrAlias, scope string) {
 		return
 	}
 
+	// Checked before DirectLookup: a DirectScopedResource's method set is a
+	// superset of DirectLookup's (it also embeds ScopedResource), so it
+	// would match that broader assertion too — the more specific check must
+	// win, or a resource like TaskGroupResource would be routed into
+	// switchToDetail (Describe) instead of a scoped List view.
+	if dsr, isDirectScoped := res.(resource.DirectScopedResource); isDirectScoped {
+		if scope == "" {
+			s.openIDPrompt(dsr.IDPromptLabel(), func(id string) {
+				s.switchResource(dsr.Name(), id)
+			})
+			return
+		}
+		s.stack.ResetTo(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope})
+		s.renderList(res, scope, false)
+		return
+	}
+
 	if direct, isDirect := res.(resource.DirectLookup); isDirect {
 		if scope == "" {
-			s.openIDPrompt(direct)
+			s.openIDPrompt(direct.IDPromptLabel(), func(id string) {
+				s.switchToDetail(res, id)
+			})
 			return
 		}
 		s.switchToDetail(res, scope)
@@ -247,6 +266,9 @@ func (s *Shell) refreshTable() {
 	if s.currentListScope != "" {
 		title += " (" + s.currentListScope + ")"
 	}
+	if s.currentScopeSubtitle != "" {
+		title += " [" + s.currentScopeSubtitle + "]"
+	}
 	if s.filterQuery != "" {
 		title += " (" + s.filterQuery + ")"
 	}
@@ -333,6 +355,7 @@ func (s *Shell) renderList(res resource.Resource, scope string, isRestore bool) 
 	s.filterQuery = s.filterByResource[res.Name()] // "" if never set
 	s.currentListResource = res.Name()
 	s.currentListScope = scope
+	s.currentScopeSubtitle = "" // repopulated by loadList if res implements ScopeSubtitle
 	s.currentColumns = res.Columns()
 	s.currentSort = s.sortByResource[res.Name()] // zero value (SortNone) if not yet sorted
 
@@ -381,9 +404,11 @@ func (s *Shell) restoreFacetValue(sf resource.ServerFaceted, name string) string
 
 // applyListResult renders a successfully fetched (or cache-hit) list result:
 // shared by loadList's synchronous cache-hit path and its async fetch-success
-// path.
-func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, counts map[string]int) {
+// path. subtitle is whatever a ScopeSubtitle resource returned alongside
+// rows ("" if the resource doesn't implement it, or the scope is empty).
+func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, counts map[string]int, subtitle string) {
 	s.lastRows = rows
+	s.currentScopeSubtitle = subtitle
 	s.augmentCompleted, s.augmentTotal = 0, 0
 	s.augmentEpoch++
 	if counts != nil {
@@ -448,7 +473,7 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 
 	if !forceRefresh {
 		if entry, ok := s.cache.get(key, res.RefreshInterval()); ok {
-			s.applyListResult(res, entry.rows, entry.counts)
+			s.applyListResult(res, entry.rows, entry.counts, entry.subtitle)
 			recordVisit() // <-- new
 			return
 		}
@@ -459,6 +484,7 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 		var counts map[string]int
 		var err error
 		var epoch int
+		var subtitle string
 
 		if sf, ok := res.(resource.ServerFaceted); ok {
 			rows, err = sf.FacetList(scope, facetValue)
@@ -474,6 +500,14 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 			}
 		} else {
 			rows, err = res.List()
+		}
+
+		// A ScopeSubtitle failure is non-fatal — sealed/expiry-style context
+		// is supplementary, not worth failing the whole list load over.
+		if err == nil && scope != "" {
+			if ss, ok := res.(resource.ScopeSubtitle); ok {
+				subtitle, _ = ss.Subtitle(scope)
+			}
 		}
 
 		s.app.QueueUpdateDraw(func() {
@@ -505,8 +539,8 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 				return
 			}
 
-			s.cache.set(key, cacheEntry{rows: rows, counts: counts, fetchedAt: time.Now()})
-			s.applyListResult(res, rows, counts) // bumps s.augmentEpoch
+			s.cache.set(key, cacheEntry{rows: rows, counts: counts, subtitle: subtitle, fetchedAt: time.Now()})
+			s.applyListResult(res, rows, counts, subtitle) // bumps s.augmentEpoch
 			epoch = s.augmentEpoch
 			recordVisit() // <-- new
 		})
@@ -525,7 +559,7 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 						s.lastRows = updated
 						s.augmentCompleted, s.augmentTotal = completed, total
 						s.refreshTable()
-						s.cache.set(key, cacheEntry{rows: updated, counts: counts, fetchedAt: time.Now()})
+						s.cache.set(key, cacheEntry{rows: updated, counts: counts, subtitle: subtitle, fetchedAt: time.Now()})
 					})
 				})
 			}

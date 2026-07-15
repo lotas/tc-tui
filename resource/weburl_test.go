@@ -124,7 +124,10 @@ func TestTasksResourceWebURL(t *testing.T) {
 func TestTaskGroupResourceWebURL(t *testing.T) {
 	res := NewTaskGroupResource(&fakeTaskcluster{})
 
-	if got, want := res.DetailWebURL(testRootURL, "GROUP1"), testRootURL+"/tasks/groups/GROUP1"; got != want {
+	if got, want := res.ListWebURL(testRootURL, "GROUP1"), testRootURL+"/tasks/groups/GROUP1"; got != want {
+		t.Errorf("ListWebURL = %q, want %q", got, want)
+	}
+	if got, want := res.DetailWebURL(testRootURL, "TASK1"), testRootURL+"/tasks/TASK1"; got != want {
 		t.Errorf("DetailWebURL = %q, want %q", got, want)
 	}
 }

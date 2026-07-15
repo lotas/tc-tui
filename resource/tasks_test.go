@@ -61,7 +61,7 @@ func TestTaskResourceDescribe(t *testing.T) {
 	}
 	groupAction := detail.Actions[1]
 	if groupAction.Key != 'g' || groupAction.Target.ResourceName != "taskgroup" ||
-		groupAction.Target.ID != "grp-1" || groupAction.Target.Kind != NavDetail {
+		groupAction.Target.ID != "grp-1" || groupAction.Target.Kind != NavScopedList {
 		t.Fatalf("unexpected action: %+v", groupAction)
 	}
 	depsAction := detail.Actions[2]

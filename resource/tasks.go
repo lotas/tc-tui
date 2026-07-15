@@ -197,7 +197,7 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 			Target: NavTarget{
 				ResourceName: "taskgroup",
 				ID:           task.TaskGroupID,
-				Kind:         NavDetail,
+				Kind:         NavScopedList,
 			},
 		},
 	}

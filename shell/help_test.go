@@ -38,6 +38,23 @@ type fakeDirectLookupResource struct {
 
 func (f fakeDirectLookupResource) IDPromptLabel() string { return f.label }
 
+type fakeDirectScopedResource struct {
+	fakeScopedResource
+	label string
+}
+
+func (f fakeDirectScopedResource) IDPromptLabel() string { return f.label }
+
+type fakeScopeSubtitleResource struct {
+	fakeScopedResource
+	subtitle    string
+	subtitleErr error
+}
+
+func (f fakeScopeSubtitleResource) Subtitle(scope string) (string, error) {
+	return f.subtitle, f.subtitleErr
+}
+
 type fakeFacetedHelpResource struct {
 	fakeResource
 }

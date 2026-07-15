@@ -22,10 +22,12 @@ func cacheKeyFor(res resource.Resource, scope, facetValue string) cacheKey {
 // cacheEntry holds one cached list fetch. counts is only populated for
 // ServerFaceted entries (FacetCounts is fetched paired with FacetList in
 // loadList, so it rides along in the same entry rather than getting its own
-// cache); it is nil otherwise.
+// cache); it is nil otherwise. subtitle is similarly only populated for a
+// ScopeSubtitle resource; "" otherwise.
 type cacheEntry struct {
 	rows      []resource.Row
 	counts    map[string]int
+	subtitle  string
 	fetchedAt time.Time
 }
 

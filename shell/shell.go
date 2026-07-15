@@ -49,14 +49,15 @@ type Shell struct {
 	helpOpen    bool
 	preHelpPage string
 
-	footer           *tview.Pages
-	footerBreadcrumb *tview.TextView
-	footerInput      *tview.InputField
-	footerMode       footerMode
-	pendingLookup    resource.Resource // set while footerMode == footerPrompt; the resource awaiting an id
+	footer              *tview.Pages
+	footerBreadcrumb    *tview.TextView
+	footerInput         *tview.InputField
+	footerMode          footerMode
+	pendingLookupCommit func(id string) // set while footerMode == footerPrompt; called with the entered id
 
 	currentListResource  string
 	currentListScope     string // "" for an unscoped list
+	currentScopeSubtitle string // set by a ScopeSubtitle resource alongside its rows; "" if none/not applicable
 	currentColumns       []resource.Column
 	lastRows             []resource.Row
 	filterQuery          string

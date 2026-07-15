@@ -6,8 +6,6 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-
-	"github.com/taskcluster/tc-tui/resource"
 )
 
 func (s *Shell) initFooter() {
@@ -163,12 +161,14 @@ func (s *Shell) openFilter() {
 }
 
 // openIDPrompt switches the footer to an inline id-entry field for a
-// DirectLookup resource reached with no id (e.g. bare `:task`), rather than
-// erroring or redirecting — there's no browsable list to redirect to.
-func (s *Shell) openIDPrompt(res resource.DirectLookup) {
+// DirectLookup or DirectScopedResource reached with no id (e.g. bare
+// `:task`), rather than erroring or redirecting — there's no browsable list
+// to redirect to. commit is called with the entered id once Enter is
+// pressed; label is what's shown before the input field, e.g. "task id".
+func (s *Shell) openIDPrompt(label string, commit func(id string)) {
 	s.footerMode = footerPrompt
-	s.pendingLookup = res
-	s.footerInput.SetLabel(fmt.Sprintf("[yellow]%s:[white] ", res.IDPromptLabel())).SetText("")
+	s.pendingLookupCommit = commit
+	s.footerInput.SetLabel(fmt.Sprintf("[yellow]%s:[white] ", label)).SetText("")
 	s.footer.SwitchToPage(pageFooterInput)
 	s.app.SetFocus(s.footerInput)
 }
@@ -209,10 +209,10 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 			if id == "" {
 				return // keep the prompt open; nothing to look up yet
 			}
-			res := s.pendingLookup
-			s.pendingLookup = nil
+			commit := s.pendingLookupCommit
+			s.pendingLookupCommit = nil
 			s.closeFooterInput()
-			s.switchToDetail(res, id)
+			commit(id)
 		}
 	case tcell.KeyEscape:
 		if s.footerMode == footerFilter {
@@ -220,7 +220,7 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 			s.filterByResource[s.currentListResource] = ""
 			s.refreshTable()
 		}
-		s.pendingLookup = nil
+		s.pendingLookupCommit = nil
 		s.closeFooterInput()
 	}
 }
