@@ -545,6 +545,51 @@ func TestToggleExpandColumnsFlipsTableStateAndShowsInTitle(t *testing.T) {
 	}
 }
 
+func TestToggleDetailWrapFlipsDetailStateAndShowsInTitle(t *testing.T) {
+	s := newTestShellForSort()
+	s.currentDetailTitle = "widget:1"
+	s.refreshDetailTitle()
+
+	if !s.detail.WrapEnabled() {
+		t.Fatalf("expected wrap enabled by default")
+	}
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: widget:1 ]"; got != want {
+		t.Fatalf("title before toggling = %q, want %q", got, want)
+	}
+
+	s.toggleDetailWrap()
+
+	if s.detail.WrapEnabled() {
+		t.Fatalf("expected first toggle to disable wrap")
+	}
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: widget:1 [no wrap] ]"; got != want {
+		t.Fatalf("title after toggling = %q, want %q", got, want)
+	}
+
+	s.toggleDetailWrap()
+
+	if !s.detail.WrapEnabled() {
+		t.Fatalf("expected second toggle to restore wrap")
+	}
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: widget:1 ]"; got != want {
+		t.Fatalf("title after second toggle = %q, want %q", got, want)
+	}
+}
+
+func TestGlobalInputCaptureXKeyTogglesDetailWrapOnDetailPage(t *testing.T) {
+	s := newTestShellForSort()
+	s.content.SwitchToPage(pageDetail)
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'x', tcell.ModNone)
+	if got := s.globalInputCapture(event); got != nil {
+		t.Fatalf("expected 'x' key to be swallowed, got %#v", got)
+	}
+
+	if s.detail.WrapEnabled() {
+		t.Fatalf("expected 'x' to toggle wrap off on the detail page")
+	}
+}
+
 func TestGlobalInputCaptureXKeyTogglesExpandColumnsOnTablePage(t *testing.T) {
 	s := newTestShellForSort()
 

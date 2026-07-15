@@ -277,6 +277,27 @@ func (s *Shell) toggleExpandColumns() {
 	s.refreshTable()
 }
 
+// toggleDetailWrap flips whether the detail body word-wraps to fit the view
+// (default) or runs lines out unbroken — the 'x' key's behavior on a detail
+// page. Unbroken lines are reachable with Left/Right/h/l, tview.TextView's
+// built-in horizontal scrolling.
+func (s *Shell) toggleDetailWrap() {
+	s.detail.SetWrapEnabled(!s.detail.WrapEnabled())
+	s.refreshDetailTitle()
+}
+
+// refreshDetailTitle rebuilds the detail page's title from
+// currentDetailTitle, appending a "[no wrap]" suffix while word-wrap is
+// toggled off — the detail-page counterpart of refreshTable's "[no
+// truncation]" suffix.
+func (s *Shell) refreshDetailTitle() {
+	title := s.currentDetailTitle
+	if !s.detail.WrapEnabled() {
+		title += " [no wrap]"
+	}
+	s.setTitle(title)
+}
+
 // refreshTable recomputes the table's displayed rows from s.lastRows by
 // applying the current filter, facet, then sort, and re-renders; it also
 // updates the title to show the active filter, if any. This is the single
@@ -641,7 +662,8 @@ func (s *Shell) loadDetail(res resource.Resource, id string, isInitial, isRestor
 			}
 			s.currentDetailActions = detail.Actions
 			s.activeContent = s.detail
-			s.setTitle(detail.Title)
+			s.currentDetailTitle = detail.Title
+			s.refreshDetailTitle()
 			s.renderHeaderHints()
 			s.renderBreadcrumbs()
 

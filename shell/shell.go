@@ -63,6 +63,7 @@ type Shell struct {
 	filterQuery          string
 	filterByResource     map[string]string
 	currentDetailActions []resource.DetailAction
+	currentDetailTitle   string
 
 	currentSort    SortState
 	sortByResource map[string]SortState
@@ -297,8 +298,11 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		s.openInBrowser()
 		return nil
 	case event.Rune() == 'x':
-		if name, _ := s.content.GetFrontPage(); name == pageTable {
+		switch name, _ := s.content.GetFrontPage(); name {
+		case pageTable:
 			s.toggleExpandColumns()
+		case pageDetail:
+			s.toggleDetailWrap()
 		}
 		return nil
 	}
