@@ -2,9 +2,14 @@ package resource
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/glamour"
+	"github.com/rivo/tview"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
 )
@@ -143,22 +148,23 @@ func (r *TaskArtifactsResource) FacetOptions(rows []Row) []string {
 	return options
 }
 
-// Describe fetches and renders one artifact's content, tail-truncated at
-// maxArtifactContentLines — see that constant's doc comment.
+// Describe fetches and renders one artifact's content — see
+// renderArtifactBody for how binary/huge/markdown-ish content is handled
+// differently.
 func (r *TaskArtifactsResource) Describe(id string) (Detail, error) {
 	taskID, runID, name, err := parseArtifactID(id)
 	if err != nil {
 		return Detail{}, err
 	}
 
-	content, err := r.tc.GetArtifactContent(taskID, runID, name)
+	content, contentType, truncated, err := r.tc.GetArtifactContent(taskID, runID, name)
 	if err != nil {
 		return Detail{}, err
 	}
 
 	return Detail{
 		Title: fmt.Sprintf("Task :: %s :: Run %d :: %s", taskID, runID, name),
-		Body:  formatArtifactContent(content),
+		Body:  renderArtifactBody(contentType, content, truncated),
 	}, nil
 }
 
@@ -170,31 +176,21 @@ func (r *TaskArtifactsResource) ListWebURL(rootURL, scope string) string {
 	return taskWebURL(rootURL, scope)
 }
 
-// DetailWebURL links to the same task page as ListWebURL — the web UI has no
-// per-artifact-content anchor of its own.
+// DetailWebURL links directly to the artifact's own content (signed when
+// authenticated) rather than the task's web page, so 'o' doubles as the
+// "open/download it" escape hatch for content this view won't render raw
+// (binary, or larger than taskcluster.MaxArtifactContentBytes).
 func (r *TaskArtifactsResource) DetailWebURL(rootURL, id string) string {
-	taskID, _, _, err := parseArtifactID(id)
+	taskID, runID, name, err := parseArtifactID(id)
 	if err != nil {
 		return ""
 	}
-	return taskWebURL(rootURL, taskID)
-}
 
-// formatArtifactContent renders raw artifact content for display, keeping
-// only the last maxArtifactContentLines lines.
-func formatArtifactContent(content string) string {
-	if strings.TrimSpace(content) == "" {
-		return "(empty)"
+	artifactURL, err := r.tc.GetArtifactURL(taskID, runID, name)
+	if err != nil {
+		return ""
 	}
-
-	lines := strings.Split(content, "\n")
-	if len(lines) <= maxArtifactContentLines {
-		return content
-	}
-
-	tail := lines[len(lines)-maxArtifactContentLines:]
-	return fmt.Sprintf("[yellow](showing last %d of %d lines)[white]\n\n%s",
-		maxArtifactContentLines, len(lines), strings.Join(tail, "\n"))
+	return artifactURL
 }
 
 // composeArtifactID and parseArtifactID identify a single artifact as
@@ -217,4 +213,257 @@ func parseArtifactID(id string) (taskID string, runID int64, name string, err er
 	}
 
 	return taskID, runID, id[idx+2:], nil
+}
+
+// maxArtifactRenderBytes caps how much rendered text is ever handed to
+// tview's TextView.SetText. tview runs on a single goroutine shared with
+// tcell's key-event loop (see shell.Shell's loadGeneration doc comment), so
+// a slow SetText call — its word-wrap/color-tag parsing cost scales with
+// input size — freezes the entire UI, including quitting, until it returns.
+// Sized to comfortably fit chroma's syntax-highlighted expansion of content
+// right at maxArtifactHighlightBytes (~4.4x for JSON, per that constant's
+// calibration) without truncating it; it's also a backstop independent of
+// maxArtifactContentLines, since even line-truncated text could be huge if
+// a handful of lines are each very long (e.g. a minified JSON blob on one
+// line).
+const maxArtifactRenderBytes = 512 * 1024 // 512 KiB
+
+// renderArtifactBody renders one artifact's content for display: binary
+// content shows metadata instead of raw bytes (garbled and possibly slow to
+// render); everything else renders via renderHighlightedOrPlain, preserved
+// in its original form rather than reformatted — debugging an artifact means
+// seeing exactly what it contains, which is a different concern from a
+// task's own (typically tiny) description/payload getting a prettified
+// render. A banner is shown whenever what's displayed may be incomplete —
+// either because the fetch itself hit taskcluster.MaxArtifactContentBytes,
+// or because the rendered text hit maxArtifactRenderBytes.
+func renderArtifactBody(contentType, content string, truncated bool) string {
+	if isBinaryArtifact(contentType, content) {
+		body := fmt.Sprintf(
+			"[green]Content-Type:[white] %s\n[green]Size:[white] %s\n\n"+
+				"[yellow](binary content isn't rendered here — press 'o' to open/download it)[white]",
+			contentTypeOrUnknown(contentType), formatBytes(int64(len(content))),
+		)
+		if truncated {
+			body += "\n[yellow](this size reflects only what was fetched — the artifact may be larger)[white]"
+		}
+		return body
+	}
+
+	body := renderHighlightedOrPlain(contentType, content)
+
+	capped := false
+	if len(body) > maxArtifactRenderBytes {
+		body = body[:maxArtifactRenderBytes]
+		capped = true
+	}
+
+	if !truncated && !capped {
+		return body
+	}
+
+	return fmt.Sprintf(
+		"[yellow](showing only part of this artifact — press 'o' to open/download the full content)[white]\n\n%s",
+		body,
+	)
+}
+
+// maxArtifactHighlightBytes caps how much content gets syntax-highlighted
+// (see renderHighlightedOrPlain) rather than shown as plain text. Chroma's
+// highlighting cost scales roughly linearly with input size — measured at
+// ~0.4ms/KiB for JSON — so this keeps the highlighting pass itself
+// comfortably under 30ms even before tview's own SetText cost on the
+// resulting (larger, tag-heavy) output; a size that felt "instant" for a
+// one-off action rather than "the UI just stalled."
+const maxArtifactHighlightBytes = 64 * 1024 // 64 KiB
+
+// renderHighlightedOrPlain syntax-highlights content in its original,
+// unmodified form (via renderHighlightedArtifact) when both a chroma
+// language is known for contentType and content is small enough for that to
+// stay fast; otherwise it falls back to renderArtifactText.
+func renderHighlightedOrPlain(contentType, content string) string {
+	lang, ok := chromaLanguageFor(contentType)
+	if !ok || len(content) > maxArtifactHighlightBytes {
+		return renderArtifactText(content)
+	}
+
+	highlighted, err := renderHighlightedArtifact(lang, content)
+	if err != nil {
+		return renderArtifactText(content)
+	}
+	return highlighted
+}
+
+// chromaLanguageFor maps a Content-Type to the language chroma should
+// highlight it as, for content types worth the highlighting cost.
+func chromaLanguageFor(contentType string) (string, bool) {
+	switch baseContentType(contentType) {
+	case "application/json":
+		return "json", true
+	case "application/x-yaml", "application/yaml", "text/yaml", "text/x-yaml":
+		return "yaml", true
+	case "application/xml", "text/xml":
+		return "xml", true
+	case "application/javascript", "text/javascript":
+		return "javascript", true
+	case "text/markdown":
+		return "markdown", true
+	default:
+		return "", false
+	}
+}
+
+// renderHighlightedArtifact syntax-highlights content in its original,
+// unmodified form — wrapped verbatim in a fenced code block of the given
+// language, never reformatted — via glamour/chroma. Unlike the shared
+// renderGlamour helper (render.go, used for a task's own first-party
+// description/payload), this escapes literal "[...]" sequences before
+// translating glamour's ANSI codes into tview tags — see
+// escapeIgnoringANSI's doc comment for why naively escaping the whole
+// ANSI-coded string (tview.Escape then tview.TranslateANSI, as renderGlamour
+// does) actively corrupts content like JSON that's full of literal "[" "]"
+// sitting right next to a color code.
+func renderHighlightedArtifact(lang, content string) (string, error) {
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(0),
+	)
+	if err != nil {
+		return "", err
+	}
+
+	out, err := renderer.Render(fmt.Sprintf("```%s\n%s\n```", lang, content))
+	if err != nil {
+		return "", err
+	}
+
+	return tview.TranslateANSI(escapeIgnoringANSI(strings.TrimSpace(out))), nil
+}
+
+// ansiCSIPattern matches a single ANSI CSI escape sequence — ESC "[" then
+// parameter bytes (digits/semicolons) then one final letter, e.g.
+// "\x1b[38;5;208m" or "\x1b[0m" — the form tview.TranslateANSI/chroma's
+// color codes use.
+var ansiCSIPattern = regexp.MustCompile("\x1b\\[[0-9;]*[A-Za-z]")
+
+// escapeIgnoringANSI applies tview.Escape only to the plain-text runs of s,
+// leaving any ANSI CSI escape sequence untouched. tview.Escape's own
+// tag-detection regex has no concept of an ANSI escape sequence — given
+// "...\x1b[38;5;187m],..." (an ANSI color code immediately followed by a
+// literal "]," from real content, e.g. a JSON array's own closing bracket),
+// it can match starting at the *ANSI code's own* "[", treating the code's
+// parameter digits as tag content and consuming the adjacent literal "]" as
+// that "tag"'s close — inserting a spurious "[" right before it and
+// corrupting the text. Escaping only ANSI-free substrings means Escape
+// never sees an ANSI code's bracket at all, so this can't happen — while
+// still leaving the real ANSI codes untouched for TranslateANSI to convert
+// afterward.
+func escapeIgnoringANSI(s string) string {
+	matches := ansiCSIPattern.FindAllStringIndex(s, -1)
+	if len(matches) == 0 {
+		return tview.Escape(s)
+	}
+
+	var b strings.Builder
+	last := 0
+	for _, loc := range matches {
+		b.WriteString(tview.Escape(s[last:loc[0]]))
+		b.WriteString(s[loc[0]:loc[1]])
+		last = loc[1]
+	}
+	b.WriteString(tview.Escape(s[last:]))
+	return b.String()
+}
+
+// renderArtifactText renders arbitrary plain-text artifact content safely:
+// escapeIgnoringANSI neutralizes any literal "[...]" in the raw text (e.g. a
+// log line like "[INFO] ...") that would otherwise be misread as a tview
+// color/region tag — including one sitting immediately after a real ANSI
+// color code (see that function's doc comment for why a plain tview.Escape
+// isn't safe there) — and tview.TranslateANSI then converts genuine ANSI
+// color codes (common in a live worker log) into real tview tags.
+// Content is tail-truncated to the last maxArtifactContentLines lines, since
+// the interesting bit of a failing task's log is almost always the end.
+func renderArtifactText(content string) string {
+	body := tview.TranslateANSI(escapeIgnoringANSI(content))
+	if strings.TrimSpace(body) == "" {
+		return "(empty)"
+	}
+
+	lines := strings.Split(body, "\n")
+	if len(lines) <= maxArtifactContentLines {
+		return body
+	}
+
+	tail := lines[len(lines)-maxArtifactContentLines:]
+	return fmt.Sprintf("[yellow](showing last %d of %d lines)[white]\n\n%s",
+		maxArtifactContentLines, len(lines), strings.Join(tail, "\n"))
+}
+
+// isBinaryArtifact reports whether content shouldn't be rendered as text. A
+// declared textual content-type is trusted outright; otherwise content is
+// sniffed for a NUL byte or invalid UTF-8 — cheap enough to run on the whole
+// string since GetArtifactContent already caps it at MaxArtifactContentBytes
+// (sampling a fixed prefix instead would risk slicing mid multi-byte rune
+// right at the sample boundary, misclassifying valid text as binary).
+func isBinaryArtifact(contentType, content string) bool {
+	if isTextualContentType(contentType) {
+		return false
+	}
+
+	if strings.ContainsRune(content, '\x00') {
+		return true
+	}
+
+	return !validUTF8AllowingTruncatedTail(content)
+}
+
+// validUTF8AllowingTruncatedTail reports whether content is valid UTF-8,
+// tolerating an incomplete multi-byte sequence dangling at the very end —
+// GetArtifactContent's size cap can produce exactly that for an otherwise-
+// valid huge text artifact cut off mid-rune, which would otherwise make it
+// look binary.
+func validUTF8AllowingTruncatedTail(content string) bool {
+	if utf8.ValidString(content) {
+		return true
+	}
+	for cut := 1; cut <= 3 && cut < len(content); cut++ {
+		if utf8.ValidString(content[:len(content)-cut]) {
+			return true
+		}
+	}
+	return false
+}
+
+// isTextualContentType reports whether contentType is a MIME type this view
+// is willing to trust as text outright without sniffing its bytes.
+func isTextualContentType(contentType string) bool {
+	switch ct := baseContentType(contentType); {
+	case strings.HasPrefix(ct, "text/"):
+		return true
+	case ct == "application/json", ct == "application/xml", ct == "application/javascript",
+		ct == "application/x-yaml", ct == "application/yaml", ct == "application/x-ndjson":
+		return true
+	default:
+		return false
+	}
+}
+
+// baseContentType strips any parameters (e.g. "; charset=utf-8") and
+// normalizes case from a Content-Type header value.
+func baseContentType(contentType string) string {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if idx := strings.Index(ct, ";"); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	return ct
+}
+
+// contentTypeOrUnknown renders a Content-Type header value for display,
+// covering artifacts the queue served with no header at all.
+func contentTypeOrUnknown(contentType string) string {
+	if contentType == "" {
+		return "(unknown)"
+	}
+	return contentType
 }

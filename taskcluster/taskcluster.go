@@ -3,6 +3,7 @@ package taskcluster
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -59,7 +60,8 @@ type Taskcluster interface {
 	GetPendingTasks(taskQueueID string) (PendingTaskList, error)
 	GetClaimedTasks(taskQueueID string) (ClaimedTaskList, error)
 	GetArtifacts(taskID string, runID int64) (ArtifactList, error)
-	GetArtifactContent(taskID string, runID int64, name string) (string, error)
+	GetArtifactContent(taskID string, runID int64, name string) (content string, contentType string, truncated bool, err error)
+	GetArtifactURL(taskID string, runID int64, name string) (string, error)
 }
 
 type TC struct {
@@ -505,35 +507,91 @@ func (tc *TC) GetArtifacts(taskID string, runID int64) (ArtifactList, error) {
 	return ArtifactList(artifacts), nil
 }
 
-// GetArtifactContent fetches the raw content of one artifact. The queue's
-// "artifact" endpoint responds with either the content itself or a redirect
-// to it depending on storage type; a plain http.Get follows that redirect
-// automatically, so no response-body parsing is needed either way. A signed
-// URL is only built when actual credentials are configured — matching the
-// Taskcluster web UI's own getArtifactUrl (buildSignedUrlSync only when
-// user.credentials is set, buildUrl otherwise) — since IsAuthenticated
-// checks whether currentScopes succeeds, which it does even anonymously (the
-// anonymous role's own scopes), so it can't be used to decide this: signing
-// with empty client ID/access token produces a bewit missing its id/mac
-// fields, which the queue rejects with "Missing bewit attributes" rather
-// than falling back to anonymous access.
-func (tc *TC) GetArtifactContent(taskID string, runID int64, name string) (string, error) {
+// MaxArtifactContentBytes caps how much of an artifact's content
+// GetArtifactContent reads into memory — a build log can run to hundreds of
+// MB, and reading it in full just to render a tail-truncated preview would
+// both waste bandwidth and risk exhausting memory. GetArtifactContent
+// reports via its truncated return value when this cap was hit.
+const MaxArtifactContentBytes = 20 * 1024 * 1024 // 20 MiB
+
+// artifactURL builds the URL to fetch or link to one artifact's content —
+// signed when actual credentials are configured, matching the Taskcluster
+// web UI's own getArtifactUrl (buildSignedUrlSync only when user.credentials
+// is set, buildUrl otherwise). IsAuthenticated can't be used for this check:
+// it tests whether currentScopes succeeds, which it does even anonymously
+// (the anonymous role's own scopes), whereas signing with an empty client
+// ID/access token produces a bewit missing its id/mac fields, which the
+// queue rejects with "Missing bewit attributes" rather than falling back to
+// anonymous access.
+func (tc *TC) artifactURL(taskID string, runID int64, name string, duration time.Duration) (string, error) {
 	runIDStr := strconv.FormatInt(runID, 10)
 
 	if tc.auth.Credentials.ClientID != "" {
-		signedURL, err := tc.queue.GetArtifact_SignedURL(taskID, runIDStr, name, 60*time.Second)
+		signedURL, err := tc.queue.GetArtifact_SignedURL(taskID, runIDStr, name, duration)
 		if err != nil {
 			return "", err
 		}
-		return getHttpResponse(signedURL.String())
+		return signedURL.String(), nil
 	}
 
 	route := fmt.Sprintf("task/%s/runs/%s/artifacts/%s", url.PathEscape(taskID), url.PathEscape(runIDStr), url.PathEscape(name))
-	return getHttpResponse(tcurls.API(tc.tcRoot, "queue", "v1", route))
+	return tcurls.API(tc.tcRoot, "queue", "v1", route), nil
+}
+
+// GetArtifactContent fetches one artifact's content, capped at
+// MaxArtifactContentBytes (see its doc comment) — truncated reports whether
+// the cap was hit. The queue's "artifact" endpoint responds with either the
+// content itself or a redirect to it depending on storage type; a plain
+// http.Get follows that redirect automatically, so no response-body parsing
+// is needed either way. contentType is the fetch response's own Content-Type
+// header, letting callers render markdown/JSON/YAML artifacts specially
+// without a second API call.
+func (tc *TC) GetArtifactContent(taskID string, runID int64, name string) (content string, contentType string, truncated bool, err error) {
+	fetchURL, err := tc.artifactURL(taskID, runID, name, 60*time.Second)
+	if err != nil {
+		return "", "", false, err
+	}
+
+	data, contentType, truncated, err := getHttpResponseCapped(fetchURL, MaxArtifactContentBytes)
+	if err != nil {
+		return "", "", false, err
+	}
+
+	return string(data), contentType, truncated, nil
+}
+
+// GetArtifactURL returns a URL suitable for opening or downloading one
+// artifact directly (e.g. via a browser) — signed when authenticated, with a
+// longer lifetime than GetArtifactContent's own fetch since there's a delay
+// between generating it and the user actually loading it.
+func (tc *TC) GetArtifactURL(taskID string, runID int64, name string) (string, error) {
+	return tc.artifactURL(taskID, runID, name, 5*time.Minute)
 }
 
 func (tc *TC) GetRoot() string {
 	return tc.tcRoot
+}
+
+// getHttpResponseCapped fetches url, reading at most maxBytes of the
+// response body — truncated reports whether the body was longer than that.
+// contentType is the response's own Content-Type header.
+func getHttpResponseCapped(url string, maxBytes int64) (content []byte, contentType string, truncated bool, err error) {
+	response, err := http.Get(url)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer response.Body.Close()
+
+	data, err := ioutil.ReadAll(io.LimitReader(response.Body, maxBytes+1))
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	contentType = response.Header.Get("Content-Type")
+	if int64(len(data)) > maxBytes {
+		return data[:maxBytes], contentType, true, nil
+	}
+	return data, contentType, false, nil
 }
 
 func getHttpResponse(url string) (string, error) {
