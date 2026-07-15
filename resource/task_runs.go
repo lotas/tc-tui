@@ -59,7 +59,7 @@ func (r *TaskRunsResource) ScopedList(taskID string) ([]Row, error) {
 			Cells: []string{
 				fmt.Sprintf("%d", run.RunID),
 				run.State,
-				fmt.Sprintf("%s/%s", run.WorkerGroup, run.WorkerID),
+				formatWorker(run.WorkerGroup, run.WorkerID),
 				fmt.Sprint(run.Resolved),
 			},
 		})

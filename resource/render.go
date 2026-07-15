@@ -80,6 +80,16 @@ func formatAge(t time.Time) string {
 	return time.Since(t).Round(time.Second).String()
 }
 
+// formatWorker renders a "group/id" worker pair — used by list columns for
+// runs that may not have a worker assigned yet (e.g. a pending run), which
+// would otherwise render as a bare "/".
+func formatWorker(group, id string) string {
+	if group == "" && id == "" {
+		return "n/a"
+	}
+	return fmt.Sprintf("%s/%s", group, id)
+}
+
 // elapsedSince renders how long after `from` (labelled sinceLabel) the `to`
 // event happened, e.g. " (5m12s after scheduled)" — used to annotate task
 // run timestamps so a reader doesn't have to diff two absolute times by

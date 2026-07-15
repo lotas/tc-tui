@@ -30,7 +30,7 @@ func TestTaskRunsResourceScopedListReturnsOneRowPerRun(t *testing.T) {
 		rows[0].Cells[2] != "us-west1/i-1234" {
 		t.Fatalf("unexpected row 0: %+v", rows[0])
 	}
-	if rows[1].ID != "task-1/1" || rows[1].Cells[2] != "/" {
+	if rows[1].ID != "task-1/1" || rows[1].Cells[2] != "n/a" {
 		t.Fatalf("unexpected row 1: %+v", rows[1])
 	}
 
