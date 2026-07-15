@@ -19,6 +19,13 @@ type TableView struct {
 	// selection after repopulating the table, e.g. after a background
 	// auto-refresh or coming back from a Detail view via Esc.
 	lastSelectedID string
+
+	// expandColumns disables every column's Width cap (toggled by the 'x'
+	// key) so columns instead size to their widest cell's natural content —
+	// columns that no longer fit the terminal are scrolled into view with
+	// the Left/Right arrow keys (tview.Table's built-in columnOffset
+	// scrolling, already active since this table has column selection off).
+	expandColumns bool
 }
 
 func NewTableView() *TableView {
@@ -69,6 +76,18 @@ func (t *TableView) SetOnSelect(fn func(row resource.Row)) {
 	t.onSelect = fn
 }
 
+// SetExpandColumns toggles whether every column's Width cap is honored.
+// Takes effect on the next SetData call — callers must re-render (e.g. via
+// Shell.refreshTable) to see the change.
+func (t *TableView) SetExpandColumns(expand bool) {
+	t.expandColumns = expand
+}
+
+// ExpandColumns reports whether column truncation is currently disabled.
+func (t *TableView) ExpandColumns() bool {
+	return t.expandColumns
+}
+
 // ResetSelection forgets the remembered selection, so the next SetData call
 // falls back to selecting the top row instead of trying to restore the
 // cursor to wherever it was — used when a sort change reorders the list
@@ -110,7 +129,7 @@ func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort
 			SetTextColor(tview.Styles.SecondaryTextColor).
 			SetSelectable(false).
 			SetAttributes(tcell.AttrBold)
-		if column.Width == 0 {
+		if column.Width == 0 || t.expandColumns {
 			cell.SetExpansion(1)
 		} else {
 			cell.SetMaxWidth(columnMaxWidth(column.Width, col, lastCol))
@@ -128,7 +147,7 @@ func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort
 			if col == 0 {
 				cell.SetReference(row)
 			}
-			if columns[col].Width == 0 {
+			if columns[col].Width == 0 || t.expandColumns {
 				cell.SetExpansion(1)
 			} else {
 				cell.SetMaxWidth(columnMaxWidth(columns[col].Width, col, lastCol))

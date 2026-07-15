@@ -141,6 +141,48 @@ func TestTableViewSetDataShowsDescendingIndicator(t *testing.T) {
 	}
 }
 
+func TestTableViewSetExpandColumnsDisablesWidthCap(t *testing.T) {
+	table := NewTableView()
+
+	columns := []resource.Column{{Title: "TASK ID", Width: 22}, {Title: "NAME"}}
+	rows := []resource.Row{{ID: "task-a", Cells: []string{"task-a", "a very long task name"}}}
+
+	table.SetData(columns, rows, SortState{})
+
+	if table.ExpandColumns() {
+		t.Fatalf("expected ExpandColumns to default to false")
+	}
+	if got := table.GetCell(0, 0).MaxWidth; got == 0 {
+		t.Fatalf("expected the fixed-width column's header to have a width cap before expanding, got %d", got)
+	}
+	if got := table.GetCell(1, 0).MaxWidth; got == 0 {
+		t.Fatalf("expected the fixed-width column's cell to have a width cap before expanding, got %d", got)
+	}
+
+	table.SetExpandColumns(true)
+	if !table.ExpandColumns() {
+		t.Fatalf("expected ExpandColumns to report true after SetExpandColumns(true)")
+	}
+
+	table.SetData(columns, rows, SortState{})
+
+	header := table.GetCell(0, 0)
+	if header.MaxWidth != 0 {
+		t.Fatalf("expected no width cap on the header once expanded, got %d", header.MaxWidth)
+	}
+	if header.Expansion != 1 {
+		t.Fatalf("expected the header to expand once truncation is disabled, got expansion %d", header.Expansion)
+	}
+
+	cell := table.GetCell(1, 0)
+	if cell.MaxWidth != 0 {
+		t.Fatalf("expected no width cap on the cell once expanded, got %d", cell.MaxWidth)
+	}
+	if cell.Expansion != 1 {
+		t.Fatalf("expected the cell to expand once truncation is disabled, got expansion %d", cell.Expansion)
+	}
+}
+
 func TestTableViewSelectingRowWithNavTargetPassesItThrough(t *testing.T) {
 	table := NewTableView()
 

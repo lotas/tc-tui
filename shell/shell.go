@@ -295,6 +295,11 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	case event.Rune() == 'o':
 		s.openInBrowser()
 		return nil
+	case event.Rune() == 'x':
+		if name, _ := s.content.GetFrontPage(); name == pageTable {
+			s.toggleExpandColumns()
+		}
+		return nil
 	}
 
 	if event.Key() == tcell.KeyRune {

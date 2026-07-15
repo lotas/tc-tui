@@ -500,6 +500,61 @@ func TestToggleSortResetsSelectionToTopRow(t *testing.T) {
 	}
 }
 
+func TestToggleExpandColumnsFlipsTableStateAndShowsInTitle(t *testing.T) {
+	s := newTestShellForSort()
+	s.refreshTable() // populate the table, as renderList/loadList would
+
+	if s.table.ExpandColumns() {
+		t.Fatalf("expected columns not expanded by default")
+	}
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: widgets ]"; got != want {
+		t.Fatalf("title before toggling = %q, want %q", got, want)
+	}
+
+	s.toggleExpandColumns()
+
+	if !s.table.ExpandColumns() {
+		t.Fatalf("expected first toggle to expand columns")
+	}
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: widgets [no truncation] ]"; got != want {
+		t.Fatalf("title after toggling = %q, want %q", got, want)
+	}
+
+	s.toggleExpandColumns()
+
+	if s.table.ExpandColumns() {
+		t.Fatalf("expected second toggle to restore truncation")
+	}
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: widgets ]"; got != want {
+		t.Fatalf("title after second toggle = %q, want %q", got, want)
+	}
+}
+
+func TestGlobalInputCaptureXKeyTogglesExpandColumnsOnTablePage(t *testing.T) {
+	s := newTestShellForSort()
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'x', tcell.ModNone)
+	if got := s.globalInputCapture(event); got != nil {
+		t.Fatalf("expected 'x' key to be swallowed, got %#v", got)
+	}
+
+	if !s.table.ExpandColumns() {
+		t.Fatalf("expected 'x' to toggle ExpandColumns on")
+	}
+}
+
+func TestGlobalInputCaptureXKeyIsNoOpOffTablePage(t *testing.T) {
+	s := newTestShellForSort()
+	s.content.SwitchToPage(pageDetail)
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'x', tcell.ModNone)
+	s.globalInputCapture(event)
+
+	if s.table.ExpandColumns() {
+		t.Fatalf("expected 'x' to be a no-op when the table page isn't showing")
+	}
+}
+
 func TestGlobalInputCaptureDigitTriggersSortOnTablePage(t *testing.T) {
 	s := newTestShellForSort()
 

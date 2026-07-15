@@ -214,6 +214,15 @@ func (s *Shell) toggleSort(column int) {
 	s.refreshTable()
 }
 
+// toggleExpandColumns flips whether the table's columns honor their Width
+// cap — the 'x' key's behavior. Columns that no longer fit the terminal once
+// expanded are reachable with the Left/Right arrow keys (tview.Table's
+// built-in horizontal scrolling).
+func (s *Shell) toggleExpandColumns() {
+	s.table.SetExpandColumns(!s.table.ExpandColumns())
+	s.refreshTable()
+}
+
 // refreshTable recomputes the table's displayed rows from s.lastRows by
 // applying the current filter, facet, then sort, and re-renders; it also
 // updates the title to show the active filter, if any. This is the single
@@ -229,6 +238,9 @@ func (s *Shell) refreshTable() {
 	}
 	if s.augmentTotal > 0 && s.augmentCompleted < s.augmentTotal {
 		title += fmt.Sprintf(" [%d/%d]", s.augmentCompleted, s.augmentTotal)
+	}
+	if s.table.ExpandColumns() {
+		title += " [no truncation]"
 	}
 	s.setTitle(title)
 

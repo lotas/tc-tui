@@ -58,6 +58,7 @@ func (s *Shell) renderHeaderHints() {
 	}
 	if top, ok := s.stack.Top(); !ok || top.Kind == ListKind {
 		hints = append(hints, hint{"/ filter", "[yellow]/[white] filter"})
+		hints = append(hints, hint{"x truncate", "[yellow]x[white] truncate"})
 	}
 	if s.hasFacets() {
 		hints = append(hints, hint{"Tab/Shift+Tab switch state", "[yellow]Tab[white]/[yellow]Shift+Tab[white] switch state"})
