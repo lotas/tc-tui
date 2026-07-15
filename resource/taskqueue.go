@@ -23,9 +23,10 @@ func (r *PendingTasksResource) Description() string {
 
 func (r *PendingTasksResource) Columns() []Column {
 	return []Column{
-		{Title: "TASK ID"},
-		{Title: "NAME", Width: 40},
-		{Title: "WORKER TYPE", Width: 24},
+		{Title: "TASK ID", Width: taskIDColumnWidth},
+		{Title: "NAME"},
+		{Title: "WORKER POOL", Width: workerPoolColumnWidth},
+		{Title: "PRIORITY", Width: 12},
 		{Title: "INSERTED", Width: 24},
 		{Title: "AGE", Width: 12},
 	}
@@ -48,7 +49,8 @@ func (r *PendingTasksResource) ScopedList(taskQueueID string) ([]Row, error) {
 			Cells: []string{
 				t.TaskID,
 				t.Task.Metadata.Name,
-				t.Task.WorkerType,
+				t.Task.ProvisionerID + "/" + t.Task.WorkerType,
+				t.Task.Priority,
 				t.Inserted.String(),
 				formatAge(time.Time(t.Inserted)),
 			},
@@ -104,8 +106,8 @@ func (r *ClaimedTasksResource) Description() string {
 
 func (r *ClaimedTasksResource) Columns() []Column {
 	return []Column{
-		{Title: "TASK ID"},
-		{Title: "NAME", Width: 40},
+		{Title: "TASK ID", Width: taskIDColumnWidth},
+		{Title: "NAME"},
 		{Title: "WORKER GROUP/ID", Width: 30},
 		{Title: "CLAIMED", Width: 24},
 		{Title: "AGE", Width: 12},

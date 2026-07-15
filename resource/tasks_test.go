@@ -51,25 +51,30 @@ func TestTaskResourceDescribe(t *testing.T) {
 	if !strings.Contains(detail.Body, "build-linux") || !strings.Contains(detail.Body, "completed") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}
-	if len(detail.Actions) != 4 {
-		t.Fatalf("expected 4 actions, got %d", len(detail.Actions))
+	if len(detail.Actions) != 5 {
+		t.Fatalf("expected 5 actions, got %d", len(detail.Actions))
 	}
-	groupAction := detail.Actions[0]
+	workerPoolAction := detail.Actions[0]
+	if workerPoolAction.Key != 'W' || workerPoolAction.Target.ResourceName != "workerpools" ||
+		workerPoolAction.Target.ID != "gcp/linux-b-large" || workerPoolAction.Target.Kind != NavDetail {
+		t.Fatalf("unexpected action: %+v", workerPoolAction)
+	}
+	groupAction := detail.Actions[1]
 	if groupAction.Key != 'g' || groupAction.Target.ResourceName != "taskgroup" ||
 		groupAction.Target.ID != "grp-1" || groupAction.Target.Kind != NavDetail {
 		t.Fatalf("unexpected action: %+v", groupAction)
 	}
-	depsAction := detail.Actions[1]
+	depsAction := detail.Actions[2]
 	if depsAction.Key != 'd' || depsAction.Target.ResourceName != "dependencies" ||
 		depsAction.Target.ID != "task-1" || depsAction.Target.Kind != NavScopedList {
 		t.Fatalf("unexpected action: %+v", depsAction)
 	}
-	dependentsAction := detail.Actions[2]
+	dependentsAction := detail.Actions[3]
 	if dependentsAction.Key != 'D' || dependentsAction.Target.ResourceName != "dependents" ||
 		dependentsAction.Target.ID != "task-1" || dependentsAction.Target.Kind != NavScopedList {
 		t.Fatalf("unexpected action: %+v", dependentsAction)
 	}
-	runsAction := detail.Actions[3]
+	runsAction := detail.Actions[4]
 	if runsAction.Key != 'R' || runsAction.Target.ResourceName != "runs" ||
 		runsAction.Target.ID != "task-1" || runsAction.Target.Kind != NavScopedList {
 		t.Fatalf("unexpected action: %+v", runsAction)
@@ -118,10 +123,10 @@ func TestTaskResourceDescribeAlwaysShowsDependentsAction(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(detail.Actions) != 2 {
-		t.Fatalf("expected 2 actions (task group + dependents, no dependencies), got %d", len(detail.Actions))
+	if len(detail.Actions) != 3 {
+		t.Fatalf("expected 3 actions (worker pool + task group + dependents, no dependencies), got %d", len(detail.Actions))
 	}
-	dependentsAction := detail.Actions[1]
+	dependentsAction := detail.Actions[2]
 	if dependentsAction.Key != 'D' || dependentsAction.Target.ResourceName != "dependents" {
 		t.Fatalf("unexpected action: %+v", dependentsAction)
 	}
@@ -218,9 +223,10 @@ func TestTasksResourceScopedList(t *testing.T) {
 			{
 				Status: tcqueue.TaskStatusStructure{TaskID: "task-1", State: "pending"},
 				Task: tcqueue.TaskDefinitionResponse{
-					Metadata:   tcqueue.TaskMetadata{Name: "build"},
-					WorkerType: "linux-b-large",
-					Created:    tcclient.Time(time.Now().Add(-time.Hour)),
+					Metadata:      tcqueue.TaskMetadata{Name: "build"},
+					ProvisionerID: "gcp",
+					WorkerType:    "linux-b-large",
+					Created:       tcclient.Time(time.Now().Add(-time.Hour)),
 				},
 			},
 		},
@@ -238,7 +244,7 @@ func TestTasksResourceScopedList(t *testing.T) {
 		t.Fatalf("unexpected id: %s", rows[0].ID)
 	}
 	if rows[0].Cells[0] != "task-1" || rows[0].Cells[1] != "build" ||
-		rows[0].Cells[2] != "pending" || rows[0].Cells[3] != "linux-b-large" {
+		rows[0].Cells[2] != "pending" || rows[0].Cells[3] != "gcp/linux-b-large" {
 		t.Fatalf("unexpected cells: %+v", rows[0].Cells)
 	}
 	if rows[0].Cells[4] == "" {

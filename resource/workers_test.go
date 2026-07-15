@@ -180,8 +180,8 @@ func TestWorkersResourceDescribe(t *testing.T) {
 	if !strings.Contains(detail.Body, "running") || !strings.Contains(detail.Body, "lc-1") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}
-	if len(detail.Actions) != 4 {
-		t.Fatalf("expected 4 sibling actions, got %d: %+v", len(detail.Actions), detail.Actions)
+	if len(detail.Actions) != 5 {
+		t.Fatalf("expected 5 sibling actions, got %d: %+v", len(detail.Actions), detail.Actions)
 	}
 }
 
@@ -416,8 +416,8 @@ func TestWorkersResourceScopeActionsExcludesWorkers(t *testing.T) {
 	res := NewWorkersResource(&fakeTaskcluster{})
 
 	actions := res.ScopeActions("gcp/pool-a")
-	if len(actions) != 4 {
-		t.Fatalf("expected 4 actions, got %d: %+v", len(actions), actions)
+	if len(actions) != 5 {
+		t.Fatalf("expected 5 actions, got %d: %+v", len(actions), actions)
 	}
 	for _, a := range actions {
 		if a.Target.ResourceName == "workers" {

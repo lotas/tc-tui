@@ -77,6 +77,12 @@ func (t *TableView) ResetSelection() {
 	t.lastSelectedID = ""
 }
 
+// columnGap is appended to every column's text except the last, on top of
+// tview's own single-space column separator — otherwise adjacent columns of
+// similar width (e.g. two 12-char columns side by side) read as one run of
+// text with no visible break.
+const columnGap = " "
+
 // SetData replaces the table's header and rows. Each row's first cell holds
 // a reference to the whole resource.Row (not just its ID), so selection can
 // read row.NavTarget as well as row.ID without a separate index-to-row
@@ -84,6 +90,8 @@ func (t *TableView) ResetSelection() {
 // that column's header text.
 func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort SortState) {
 	t.Clear()
+
+	lastCol := len(columns) - 1
 
 	for col, column := range columns {
 		title := column.Title
@@ -94,6 +102,9 @@ func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort
 				title += " ▼"
 			}
 		}
+		if col != lastCol {
+			title += columnGap
+		}
 
 		cell := tview.NewTableCell(title).
 			SetTextColor(tview.Styles.SecondaryTextColor).
@@ -102,13 +113,17 @@ func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort
 		if column.Width == 0 {
 			cell.SetExpansion(1)
 		} else {
-			cell.SetMaxWidth(column.Width)
+			cell.SetMaxWidth(columnMaxWidth(column.Width, col, lastCol))
 		}
 		t.SetCell(0, col, cell)
 	}
 
 	for r, row := range rows {
 		for col, value := range row.Cells {
+			if col != lastCol {
+				value += columnGap
+			}
+
 			cell := tview.NewTableCell(value)
 			if col == 0 {
 				cell.SetReference(row)
@@ -116,7 +131,7 @@ func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort
 			if columns[col].Width == 0 {
 				cell.SetExpansion(1)
 			} else {
-				cell.SetMaxWidth(columns[col].Width)
+				cell.SetMaxWidth(columnMaxWidth(columns[col].Width, col, lastCol))
 			}
 			t.SetCell(r+1, col, cell)
 		}
@@ -148,4 +163,14 @@ func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort
 		}
 		t.ScrollToBeginning()
 	}
+}
+
+// columnMaxWidth returns width's cap, plus one extra character for the
+// columnGap suffix on every column but the last — otherwise a value that
+// exactly fills width would have its trailing gap truncated away.
+func columnMaxWidth(width, col, lastCol int) int {
+	if col != lastCol {
+		return width + 1
+	}
+	return width
 }

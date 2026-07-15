@@ -91,6 +91,47 @@ func TestHeaderRowsNeededGrowsWithHintCount(t *testing.T) {
 	}
 }
 
+func TestRenderHeaderHintsShowsFilterOnListView(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.stack.Push(View{ResourceName: "workerpools", Kind: ListKind})
+
+	s.renderHeaderHints()
+
+	text := s.headerHint.GetText(false)
+	if !strings.Contains(text, "filter") {
+		t.Fatalf("expected filter hint on a list view, got %q", text)
+	}
+}
+
+func TestRenderHeaderHintsOmitsFilterOnDetailView(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.stack.Push(View{ResourceName: "workerpools", Kind: DetailKind, SelectedID: "gcp/pool-a"})
+
+	s.renderHeaderHints()
+
+	text := s.headerHint.GetText(false)
+	if strings.Contains(text, "filter") {
+		t.Fatalf("expected no filter hint on a detail view, got %q", text)
+	}
+}
+
+func TestRenderHeaderHintsRendersDetailActionsWithoutBrackets(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentDetailActions = []resource.DetailAction{
+		{Key: 'w', Label: "workers"},
+	}
+
+	s.renderHeaderHints()
+
+	text := s.headerHint.GetText(false)
+	if !strings.Contains(text, "[yellow]w[white] workers") {
+		t.Fatalf("expected bracket-free detail action hint, got %q", text)
+	}
+	if strings.Contains(text, "<w>") {
+		t.Fatalf("expected no angle-bracket detail action hint, got %q", text)
+	}
+}
+
 func TestRenderBreadcrumbsEmptyStack(t *testing.T) {
 	s := New(resource.NewRegistry())
 

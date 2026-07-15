@@ -43,7 +43,8 @@ type hint struct {
 }
 
 // renderHeaderHints rebuilds the header's center hint column: global keys,
-// the facet-switch hint when the current list has facets, and any
+// the filter hint (list views only — `/` is a no-op on a detail view), the
+// facet-switch hint when the current list has facets, and any
 // per-detail-action keys the current detail screen exposes. Hints are laid
 // out as a left-aligned grid of hintColumns columns, each padded to the
 // width of the longest hint, rather than centered free text.
@@ -51,10 +52,12 @@ func (s *Shell) renderHeaderHints() {
 	hints := []hint{
 		{"q quit", "[yellow]q[white] quit"},
 		{": command", "[yellow]:[white] command"},
-		{"/ filter", "[yellow]/[white] filter"},
 		{"r refresh", "[yellow]r[white] refresh"},
 		{"Esc back", "[yellow]Esc[white] back"},
 		{"? help", "[yellow]?[white] help"},
+	}
+	if top, ok := s.stack.Top(); !ok || top.Kind == ListKind {
+		hints = append(hints, hint{"/ filter", "[yellow]/[white] filter"})
 	}
 	if s.hasFacets() {
 		hints = append(hints, hint{"Tab/Shift+Tab switch state", "[yellow]Tab[white]/[yellow]Shift+Tab[white] switch state"})
@@ -64,8 +67,8 @@ func (s *Shell) renderHeaderHints() {
 	}
 	for _, action := range s.currentDetailActions {
 		hints = append(hints, hint{
-			plain:   fmt.Sprintf("<%c> %s", action.Key, action.Label),
-			colored: fmt.Sprintf("[yellow]<%c>[white] %s", action.Key, action.Label),
+			plain:   fmt.Sprintf("%c %s", action.Key, action.Label),
+			colored: fmt.Sprintf("[yellow]%c[white] %s", action.Key, action.Label),
 		})
 	}
 

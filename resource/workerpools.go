@@ -176,14 +176,16 @@ func (r *WorkerPoolsResource) Augment(rows []Row, onUpdate func(rows []Row, comp
 }
 
 // workerPoolActions returns the standard set of quick-jump keys to a worker
-// pool's sub-resources (workers/pending/claimed/launchconfigs/errors),
-// scoped pool-wide to workerPoolID. exclude omits the action whose
-// ResourceName matches — typically the resource currently showing the
-// hints itself, since pressing its own key to "jump" to the view already on
-// screen isn't useful. If exclude doesn't match any of the 5 ResourceNames
-// (e.g. a typo), it has no effect and all 5 actions are returned.
+// pool's sub-resources (workers/pending/claimed/launchconfigs/errors) and to
+// the pool itself, scoped pool-wide to workerPoolID. exclude omits the
+// action whose ResourceName matches — typically the resource currently
+// showing the hints itself, since pressing its own key to "jump" to the
+// view already on screen isn't useful. If exclude doesn't match any of the
+// 6 ResourceNames (e.g. a typo), it has no effect and all 6 actions are
+// returned.
 func workerPoolActions(workerPoolID, exclude string) []DetailAction {
 	all := []DetailAction{
+		{Key: 'W', Label: "worker pool", Target: NavTarget{ResourceName: "workerpools", ID: workerPoolID, Kind: NavDetail}},
 		{Key: 'w', Label: "workers", Target: NavTarget{ResourceName: "workers", ID: workerPoolID, Kind: NavScopedList}},
 		{Key: 'p', Label: "pending", Target: NavTarget{ResourceName: "pending", ID: workerPoolID, Kind: NavScopedList}},
 		{Key: 'c', Label: "claimed", Target: NavTarget{ResourceName: "claimed", ID: workerPoolID, Kind: NavScopedList}},
@@ -238,7 +240,7 @@ func (r *WorkerPoolsResource) Describe(id string) (Detail, error) {
 	return Detail{
 		Title:   fmt.Sprintf("Worker Pool :: %s", pool.WorkerPoolID),
 		Body:    body,
-		Actions: workerPoolActions(pool.WorkerPoolID, ""),
+		Actions: workerPoolActions(pool.WorkerPoolID, r.Name()),
 	}, nil
 }
 

@@ -16,7 +16,7 @@ func TestPendingTasksResourceScopedList(t *testing.T) {
 		pendingTasks: taskcluster.PendingTaskList{
 			{
 				TaskID:   "task-1",
-				Task:     tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}, WorkerType: "linux-b-large"},
+				Task:     tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}, ProvisionerID: "gcp", WorkerType: "linux-b-large", Priority: "high"},
 				Inserted: tcclient.Time(time.Now().Add(-time.Minute)),
 			},
 		},
@@ -31,10 +31,10 @@ func TestPendingTasksResourceScopedList(t *testing.T) {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
 	if rows[0].ID != "task-1" || rows[0].Cells[0] != "task-1" ||
-		rows[0].Cells[1] != "build" || rows[0].Cells[2] != "linux-b-large" {
+		rows[0].Cells[1] != "build" || rows[0].Cells[2] != "gcp/linux-b-large" || rows[0].Cells[3] != "high" {
 		t.Fatalf("unexpected row: %+v", rows[0])
 	}
-	if rows[0].Cells[4] == "" {
+	if rows[0].Cells[5] == "" {
 		t.Fatalf("expected a non-empty AGE cell, got %+v", rows[0])
 	}
 }
@@ -159,8 +159,8 @@ func TestPendingTasksResourceScopeActionsExcludesPending(t *testing.T) {
 	res := NewPendingTasksResource(&fakeTaskcluster{})
 
 	actions := res.ScopeActions("gcp/pool-a")
-	if len(actions) != 4 {
-		t.Fatalf("expected 4 actions, got %d: %+v", len(actions), actions)
+	if len(actions) != 5 {
+		t.Fatalf("expected 5 actions, got %d: %+v", len(actions), actions)
 	}
 	for _, a := range actions {
 		if a.Target.ResourceName == "pending" {
@@ -176,8 +176,8 @@ func TestClaimedTasksResourceScopeActionsExcludesClaimed(t *testing.T) {
 	res := NewClaimedTasksResource(&fakeTaskcluster{})
 
 	actions := res.ScopeActions("gcp/pool-a")
-	if len(actions) != 4 {
-		t.Fatalf("expected 4 actions, got %d: %+v", len(actions), actions)
+	if len(actions) != 5 {
+		t.Fatalf("expected 5 actions, got %d: %+v", len(actions), actions)
 	}
 	for _, a := range actions {
 		if a.Target.ResourceName == "claimed" {

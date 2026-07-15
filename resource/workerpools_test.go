@@ -356,14 +356,21 @@ func TestWorkerPoolsResourceRefreshInterval(t *testing.T) {
 	}
 }
 
-func TestWorkerPoolActionsWithNoExclusionReturnsAllFive(t *testing.T) {
+func TestWorkerPoolActionsWithNoExclusionReturnsAllSix(t *testing.T) {
 	actions := workerPoolActions("proj/pool-a", "")
 
-	if len(actions) != 5 {
-		t.Fatalf("expected all 5 actions, got %d: %+v", len(actions), actions)
+	if len(actions) != 6 {
+		t.Fatalf("expected all 6 actions, got %d: %+v", len(actions), actions)
 	}
 	for _, a := range actions {
-		if a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
+		if a.Target.ID != "proj/pool-a" {
+			t.Fatalf("unexpected action: %+v", a)
+		}
+		if a.Target.ResourceName == "workerpools" {
+			if a.Target.Kind != NavDetail {
+				t.Fatalf("expected the \"worker pool\" action to be a Detail nav, got %+v", a)
+			}
+		} else if a.Target.Kind != NavScopedList {
 			t.Fatalf("unexpected action: %+v", a)
 		}
 	}
@@ -372,8 +379,8 @@ func TestWorkerPoolActionsWithNoExclusionReturnsAllFive(t *testing.T) {
 func TestWorkerPoolActionsExcludesGivenResource(t *testing.T) {
 	actions := workerPoolActions("proj/pool-a", "workers")
 
-	if len(actions) != 4 {
-		t.Fatalf("expected 4 actions (5 minus excluded), got %d: %+v", len(actions), actions)
+	if len(actions) != 5 {
+		t.Fatalf("expected 5 actions (6 minus excluded), got %d: %+v", len(actions), actions)
 	}
 	for _, a := range actions {
 		if a.Target.ResourceName == "workers" {
@@ -382,10 +389,10 @@ func TestWorkerPoolActionsExcludesGivenResource(t *testing.T) {
 	}
 }
 
-func TestWorkerPoolActionsWithUnmatchedExcludeReturnsAllFive(t *testing.T) {
+func TestWorkerPoolActionsWithUnmatchedExcludeReturnsAllSix(t *testing.T) {
 	actions := workerPoolActions("proj/pool-a", "not-a-real-resource")
 
-	if len(actions) != 5 {
-		t.Fatalf("expected an unmatched exclude to leave all 5 actions, got %d: %+v", len(actions), actions)
+	if len(actions) != 6 {
+		t.Fatalf("expected an unmatched exclude to leave all 6 actions, got %d: %+v", len(actions), actions)
 	}
 }

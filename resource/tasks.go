@@ -105,10 +105,10 @@ func (r *TasksResource) DetailWebURL(rootURL, id string) string {
 // are built by taskListRows (TasksResource, TaskDependentsResource).
 func taskListColumns() []Column {
 	return []Column{
-		{Title: "TASK ID"},
-		{Title: "NAME", Width: 40},
+		{Title: "TASK ID", Width: taskIDColumnWidth},
+		{Title: "NAME"},
 		{Title: "STATE", Width: 12},
-		{Title: "WORKER TYPE", Width: 24},
+		{Title: "WORKER POOL", Width: workerPoolColumnWidth},
 		{Title: "AGE", Width: 12},
 	}
 }
@@ -124,7 +124,7 @@ func taskListRows(tasks taskcluster.TaskGroupTaskList) []Row {
 				t.Status.TaskID,
 				t.Task.Metadata.Name,
 				t.Status.State,
-				t.Task.WorkerType,
+				t.Task.ProvisionerID + "/" + t.Task.WorkerType,
 				formatAge(time.Time(t.Task.Created)),
 			},
 		})
@@ -182,6 +182,15 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 	)
 
 	actions := []DetailAction{
+		{
+			Key:   'W',
+			Label: "worker pool",
+			Target: NavTarget{
+				ResourceName: "workerpools",
+				ID:           task.ProvisionerID + "/" + task.WorkerType,
+				Kind:         NavDetail,
+			},
+		},
 		{
 			Key:   'g',
 			Label: "task group",

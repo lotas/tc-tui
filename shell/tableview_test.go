@@ -120,7 +120,7 @@ func TestTableViewSetDataShowsSortIndicatorOnActiveColumn(t *testing.T) {
 	}
 
 	unsorted := table.GetCell(0, 0).Text
-	if unsorted != "WORKER POOL ID" {
+	if unsorted != "WORKER POOL ID"+columnGap {
 		t.Fatalf("expected no indicator on non-sorted column, got %q", unsorted)
 	}
 }

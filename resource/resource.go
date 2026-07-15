@@ -8,6 +8,18 @@ type Column struct {
 	Width int // 0 = flexible
 }
 
+// taskIDColumnWidth fits a Taskcluster task ID (a 22-character slugid) with a
+// little breathing room. Task ID columns are given this fixed width rather
+// than left flexible (Width: 0), so a flexible column elsewhere (e.g. NAME)
+// absorbs the terminal's leftover width instead.
+const taskIDColumnWidth = 24
+
+// workerPoolColumnWidth fits a workerPoolId/taskQueueId
+// (provisionerId/workerType, e.g. "proj-fuzzing/grizzly-reduce-worker-android")
+// — wider than a bare workerType, since the provisioner prefix can push the
+// combined string well past 24 characters.
+const workerPoolColumnWidth = 40
+
 // Row is one row of a Resource's list view. ID is the stable identity used
 // to look the entity back up (e.g. via Describe) — never a slice index.
 type Row struct {
