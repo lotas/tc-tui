@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/rivo/tview"
@@ -108,4 +109,16 @@ func buildHelpText(registry *resource.Registry) string {
 	b.WriteString("  Some detail screens expose extra keys (e.g. [yellow]w[white] workers) shown in that screen's own header hint bar when available.\n")
 
 	return b.String()
+}
+
+// colorTagRegexp matches buildHelpText's tview [color] region tags — always
+// a single lowercase color word, never dynamic content — so it's safe to
+// strip wholesale for plain-terminal output.
+var colorTagRegexp = regexp.MustCompile(`\[[a-z]+\]`)
+
+// PlainHelpText is the same content shown by the in-app '?' help overlay
+// (buildHelpText), with tview's [color] region tags stripped — for printing
+// to a plain terminal, e.g. the CLI's --help.
+func PlainHelpText(registry *resource.Registry) string {
+	return colorTagRegexp.ReplaceAllString(buildHelpText(registry), "")
 }

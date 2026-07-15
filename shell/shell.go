@@ -368,6 +368,15 @@ func (s *Shell) Start(rootResource string) error {
 	return s.app.Run()
 }
 
+// StartAt behaves like Start, but jumps straight to name/scope (resolved the
+// same way as the `:` command bar — see switchResource) instead of restored
+// state or a fallback root resource, discarding any restored navigation
+// stack. Used when the CLI is given a positional resource argument.
+func (s *Shell) StartAt(name, scope string) error {
+	s.switchResource(name, scope)
+	return s.app.Run()
+}
+
 func (s *Shell) Stop() {
 	s.stopRefreshLoop()
 	s.app.Stop()
