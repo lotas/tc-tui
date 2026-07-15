@@ -2,10 +2,18 @@ package resource
 
 import "time"
 
-// Column describes one column of a Resource's list view.
+// Column describes one column of a Resource's list view. Width and Expand
+// are independent: Width is a truncation cap (removed entirely by the 'x'
+// key — see shell.TableView), while Expand says whether the column also
+// soaks up leftover terminal width beyond that cap, the way a CSS flex-grow
+// column would. Width: 0 implies Expand regardless of Expand's own value —
+// a column with no cap at all only makes sense if it also grows to fill
+// whatever space it's given, matching every existing zero-Width column's
+// original "flexible" behavior.
 type Column struct {
-	Title string
-	Width int // 0 = flexible
+	Title  string
+	Width  int  // 0 = size to content, uncapped even without Expand
+	Expand bool // grow into leftover terminal width past Width, if any remains
 }
 
 // taskIDColumnWidth fits a Taskcluster task ID (a 22-character slugid) with a

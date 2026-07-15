@@ -183,6 +183,59 @@ func TestTableViewSetExpandColumnsDisablesWidthCap(t *testing.T) {
 	}
 }
 
+func TestTableViewExpandColumnKeepsWidthCapButAlsoExpands(t *testing.T) {
+	table := NewTableView()
+
+	columns := []resource.Column{
+		{Title: "ID", Width: 10},
+		{Title: "TITLE", Width: 40, Expand: true},
+	}
+	rows := []resource.Row{{ID: "a", Cells: []string{"a", "a title"}}}
+
+	table.SetData(columns, rows, SortState{})
+
+	header := table.GetCell(0, 1)
+	if header.MaxWidth == 0 {
+		t.Fatalf("expected TITLE's header to still have a width cap by default")
+	}
+	if header.Expansion != 1 {
+		t.Fatalf("expected TITLE's header to expand despite having a Width cap, got expansion %d", header.Expansion)
+	}
+
+	cell := table.GetCell(1, 1)
+	if cell.MaxWidth == 0 {
+		t.Fatalf("expected TITLE's cell to still have a width cap by default")
+	}
+	if cell.Expansion != 1 {
+		t.Fatalf("expected TITLE's cell to expand despite having a Width cap, got expansion %d", cell.Expansion)
+	}
+
+	// The non-Expand ID column should not gain expansion just because a
+	// later column has it.
+	idHeader := table.GetCell(0, 0)
+	if idHeader.Expansion != 0 {
+		t.Fatalf("expected ID's header to have no expansion, got %d", idHeader.Expansion)
+	}
+}
+
+func TestTableViewExpandColumnsToggleStillRemovesCapOnExpandColumn(t *testing.T) {
+	table := NewTableView()
+	table.SetExpandColumns(true)
+
+	columns := []resource.Column{{Title: "TITLE", Width: 40, Expand: true}}
+	rows := []resource.Row{{ID: "a", Cells: []string{"a very long title that would normally be capped"}}}
+
+	table.SetData(columns, rows, SortState{})
+
+	cell := table.GetCell(1, 0)
+	if cell.MaxWidth != 0 {
+		t.Fatalf("expected the 'x' toggle to remove the cap even on an Expand column, got %d", cell.MaxWidth)
+	}
+	if cell.Expansion != 1 {
+		t.Fatalf("expected the cell to still expand, got expansion %d", cell.Expansion)
+	}
+}
+
 func TestTableViewSelectingRowWithNavTargetPassesItThrough(t *testing.T) {
 	table := NewTableView()
 

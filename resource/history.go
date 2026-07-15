@@ -45,9 +45,21 @@ func (r *HistoryResource) Description() string {
 func (r *HistoryResource) Columns() []Column {
 	return []Column{
 		{Title: "RESOURCE TYPE", Width: 20},
-		{Title: "RESOURCE ID"},
+		// Capped, unlike most identity columns: a worker recent-task/detail
+		// visit's SelectedID is "workerPoolId::workerGroup::workerId", which
+		// can run well past 80 characters and, left flexible (Width: 0),
+		// crowded WHEN/TITLE down to a sliver. Press 'x' to see the full id.
+		{Title: "RESOURCE ID", Width: 55},
 		{Title: "WHEN", Width: 25},
-		{Title: "TITLE"},
+		// Width is a baseline/truncation cap (like TITLE elsewhere — see
+		// workerpoolerrors.go); Expand lets it still grow into whatever
+		// terminal width is left over once every other column has claimed
+		// its own share, rather than being stuck at exactly 40 on a wide
+		// terminal. Left fully flexible (Width: 0) it was exempt from the
+		// 'x' truncation toggle entirely (uncapped columns always render
+		// uncapped) and its rendered width swung unpredictably with
+		// whatever space RESOURCE ID left over.
+		{Title: "TITLE", Width: 40, Expand: true},
 	}
 }
 

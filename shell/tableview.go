@@ -129,9 +129,10 @@ func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort
 			SetTextColor(tview.Styles.SecondaryTextColor).
 			SetSelectable(false).
 			SetAttributes(tcell.AttrBold)
-		if column.Width == 0 || t.expandColumns {
+		if column.Width == 0 || column.Expand || t.expandColumns {
 			cell.SetExpansion(1)
-		} else {
+		}
+		if column.Width != 0 && !t.expandColumns {
 			cell.SetMaxWidth(columnMaxWidth(column.Width, col, lastCol))
 		}
 		t.SetCell(0, col, cell)
@@ -147,9 +148,10 @@ func (t *TableView) SetData(columns []resource.Column, rows []resource.Row, sort
 			if col == 0 {
 				cell.SetReference(row)
 			}
-			if columns[col].Width == 0 || t.expandColumns {
+			if columns[col].Width == 0 || columns[col].Expand || t.expandColumns {
 				cell.SetExpansion(1)
-			} else {
+			}
+			if columns[col].Width != 0 && !t.expandColumns {
 				cell.SetMaxWidth(columnMaxWidth(columns[col].Width, col, lastCol))
 			}
 			t.SetCell(r+1, col, cell)
