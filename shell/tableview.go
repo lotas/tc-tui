@@ -76,6 +76,24 @@ func (t *TableView) SetOnSelect(fn func(row resource.Row)) {
 	t.onSelect = fn
 }
 
+// SelectedRow returns the resource.Row currently highlighted, if any — used
+// by actions that operate on a list's selection without first navigating
+// into that row's own Detail view (e.g. the 's' save-to-disk key).
+func (t *TableView) SelectedRow() (resource.Row, bool) {
+	row, _ := t.GetSelection()
+	if row <= 0 {
+		return resource.Row{}, false
+	}
+
+	cell := t.GetCell(row, 0)
+	if cell == nil {
+		return resource.Row{}, false
+	}
+
+	r, ok := cell.GetReference().(resource.Row)
+	return r, ok
+}
+
 // SetExpandColumns toggles whether every column's Width cap is honored.
 // Takes effect on the next SetData call — callers must re-render (e.g. via
 // Shell.refreshTable) to see the change.

@@ -66,6 +66,9 @@ func (s *Shell) renderHeaderHints() {
 	if url, ok := s.currentWebURL(); ok && url != "" {
 		hints = append(hints, hint{"o open in browser", "[yellow]o[white] open in browser"})
 	}
+	if _, _, _, ok := s.currentDownloadable(); ok {
+		hints = append(hints, hint{"s save", "[yellow]s[white] save"})
+	}
 	for _, action := range s.currentDetailActions {
 		hints = append(hints, hint{
 			plain:   fmt.Sprintf("%c %s", action.Key, action.Label),

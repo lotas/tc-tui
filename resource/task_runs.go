@@ -109,6 +109,17 @@ func (r *TaskRunsResource) Describe(id string) (Detail, error) {
 			},
 		})
 	}
+	if name, ok := findLiveLogArtifact(r.tc, taskID, runID); ok {
+		actions = append(actions, DetailAction{
+			Key:   'l',
+			Label: "live log",
+			Target: NavTarget{
+				ResourceName: "artifacts",
+				ID:           composeArtifactID(taskID, runID, name),
+				Kind:         NavDetail,
+			},
+		})
+	}
 	// Always shown, like describeTask's own 'a' action — artifacts is
 	// scoped by task (tabbing over whichever runs exist), not by this one
 	// run, so there's nothing to gate on here either.

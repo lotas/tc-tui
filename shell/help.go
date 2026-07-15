@@ -46,6 +46,7 @@ func buildHelpText(registry *resource.Registry) string {
 		"that no longer fit; on a detail view, toggle word-wrap — use Left/Right/h/l to scroll horizontally " +
 		"once it's off\n")
 	b.WriteString("  [yellow]o[white]     open the current view in Taskcluster's web UI, if that resource has one\n")
+	b.WriteString("  [yellow]s[white]     save the current view's content to a local file, if that resource supports it (e.g. an artifact)\n")
 	b.WriteString("  [yellow]Esc[white]   go back\n")
 	b.WriteString("  [yellow]?[white]     toggle this help screen\n\n")
 

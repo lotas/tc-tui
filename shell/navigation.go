@@ -695,3 +695,10 @@ func (s *Shell) showError(title string, err error, retry func()) {
 func (s *Shell) showTransientWarning(msg string) {
 	s.footerBreadcrumb.SetText(fmt.Sprintf("[red]%s[white]", msg))
 }
+
+// showTransientInfo behaves like showTransientWarning but in green — for
+// non-error feedback (e.g. a completed save) rather than something gone
+// wrong.
+func (s *Shell) showTransientInfo(msg string) {
+	s.footerBreadcrumb.SetText(fmt.Sprintf("[green]%s[white]", msg))
+}

@@ -235,6 +235,22 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 				Kind:         NavScopedList,
 			},
 		})
+
+		// The latest run (last in Runs — Taskcluster appends retries, never
+		// reorders) is the one whose live log a user actually wants; older
+		// retries' live logs are still one 'a' + a tab away via artifacts.
+		latestRun := status.Runs[len(status.Runs)-1]
+		if name, ok := findLiveLogArtifact(tc, taskID, latestRun.RunID); ok {
+			actions = append(actions, DetailAction{
+				Key:   'l',
+				Label: "live log",
+				Target: NavTarget{
+					ResourceName: "artifacts",
+					ID:           composeArtifactID(taskID, latestRun.RunID, name),
+					Kind:         NavDetail,
+				},
+			})
+		}
 	}
 	// Always shown, like dependents — TaskArtifactsResource is scoped by
 	// task (not by a single run), tabbing over whichever runs exist, so
@@ -288,6 +304,37 @@ func renderRunBody(tc taskcluster.Taskcluster, taskID string, run tcqueue.RunInf
 		b.WriteString(renderRunArtifacts(tc, taskID, run.RunID))
 	}
 	return b.String()
+}
+
+// liveLogArtifactNames are the artifact names checked, in preference order,
+// when jumping straight to a run's live log via the 'l' action: "live.log"
+// is the streamed copy served only while a run is still executing; once it
+// resolves, workers keep only "live_backing.log", their plain backing copy
+// of the same output.
+var liveLogArtifactNames = []string{"public/logs/live.log", "public/logs/live_backing.log"}
+
+// findLiveLogArtifact looks for a live-log-shaped artifact among runID's own
+// artifacts, returning the first name found (checked in
+// liveLogArtifactNames' preference order) — shared by describeTask's 'l'
+// action (for a task's latest run) and TaskRunsResource.Describe's (for that
+// specific run).
+func findLiveLogArtifact(tc taskcluster.Taskcluster, taskID string, runID int64) (string, bool) {
+	artifacts, err := tc.GetArtifacts(taskID, runID)
+	if err != nil {
+		return "", false
+	}
+
+	present := make(map[string]bool, len(artifacts))
+	for _, a := range artifacts {
+		present[a.Name] = true
+	}
+
+	for _, name := range liveLogArtifactNames {
+		if present[name] {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // renderRunArtifacts lists the artifacts produced by one run, indented to

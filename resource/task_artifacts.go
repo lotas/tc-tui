@@ -2,6 +2,7 @@ package resource
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 	"sync"
@@ -184,6 +185,35 @@ func (r *TaskArtifactsResource) DetailWebURL(rootURL, id string) string {
 		return ""
 	}
 	return artifactURL
+}
+
+// DownloadFilename suggests just the base name of the artifact (e.g.
+// "live_backing.log" for "public/logs/live_backing.log") rather than its
+// full path-like name — saving into the current working directory shouldn't
+// require recreating an artifact's internal directory structure.
+func (r *TaskArtifactsResource) DownloadFilename(id string) (string, bool) {
+	_, _, name, err := parseArtifactID(id)
+	if err != nil || name == "" {
+		return "", false
+	}
+	return path.Base(name), true
+}
+
+// DownloadContent fetches an artifact's raw content for saving to disk —
+// unlike Describe's Body, this is never syntax-highlighted or
+// ANSI-translated.
+func (r *TaskArtifactsResource) DownloadContent(id string) ([]byte, bool, error) {
+	taskID, runID, name, err := parseArtifactID(id)
+	if err != nil {
+		return nil, false, err
+	}
+
+	content, _, truncated, err := r.tc.GetArtifactContent(taskID, runID, name)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return []byte(content), truncated, nil
 }
 
 // composeArtifactID and parseArtifactID identify a single artifact as

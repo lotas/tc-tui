@@ -205,3 +205,22 @@ type WebLinkable interface {
 	DetailWebURL(rootURL, id string) string
 	ListWebURL(rootURL, scope string) string
 }
+
+// Downloadable is implemented by a Resource whose Detail view can save its
+// entity's raw content to a local file (e.g. an artifact's actual bytes) —
+// distinct from WebLinkable's DetailWebURL, which downloads via an external
+// browser instead of directly from within the TUI.
+type Downloadable interface {
+	Resource
+	// DownloadFilename returns the suggested local filename for id, and
+	// whether id supports being downloaded at all. Derived from id alone,
+	// with no fetch, so it's cheap enough to call before prompting for a
+	// save path.
+	DownloadFilename(id string) (filename string, ok bool)
+	// DownloadContent fetches id's raw content to save to disk — the
+	// original bytes, not whatever transformed preview a Detail view's Body
+	// might render (e.g. syntax-highlighted or ANSI-translated). truncated
+	// reports whether the underlying fetch was capped before reaching the
+	// content's actual end.
+	DownloadContent(id string) (content []byte, truncated bool, err error)
+}

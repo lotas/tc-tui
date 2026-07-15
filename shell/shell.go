@@ -297,6 +297,9 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	case event.Rune() == 'o':
 		s.openInBrowser()
 		return nil
+	case event.Rune() == 's':
+		s.promptSaveToDisk()
+		return nil
 	case event.Rune() == 'x':
 		switch name, _ := s.content.GetFrontPage(); name {
 		case pageTable:
