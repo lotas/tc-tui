@@ -137,8 +137,8 @@ func TestTaskDependenciesAndDependentsResourceWebURL(t *testing.T) {
 	if got, want := deps.ListWebURL(testRootURL, "TASK1"), testRootURL+"/tasks/TASK1"; got != want {
 		t.Errorf("dependencies ListWebURL = %q, want %q", got, want)
 	}
-	if got := deps.DetailWebURL(testRootURL, "TASK2"); got != "" {
-		t.Errorf("dependencies DetailWebURL = %q, want empty (unreachable)", got)
+	if got, want := deps.DetailWebURL(testRootURL, "TASK2"), testRootURL+"/tasks/TASK2"; got != want {
+		t.Errorf("dependencies DetailWebURL = %q, want %q", got, want)
 	}
 
 	dependents := NewTaskDependentsResource(&fakeTaskcluster{})

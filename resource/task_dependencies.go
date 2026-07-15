@@ -2,18 +2,21 @@ package resource
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
 )
 
 // TaskDependenciesResource lists a task's dependencies, scoped by that
-// task's own ID. Every row overrides navigation via NavTarget straight to
-// the dependency's own Detail view (see Row.NavTarget), so Describe is
-// never called and this resource is never reached other than via the task
-// detail's 'd' action — Taskcluster's Queue API exposes only dependency IDs
-// (task.Dependencies), not full task+status rows, so there's nothing richer
-// to show per row.
+// task's own ID. Taskcluster's Queue API exposes only dependency IDs
+// (task.Dependencies), not full task+status rows the way listDependentTasks
+// does for TaskDependentsResource — so ScopedList fetches each dependency's
+// task+status individually (bounded concurrency) to build the same
+// name/state/worker-pool/age row shape dependents already gets. A single
+// dependency's fetch failing doesn't fail the whole list — its row just
+// shows the failure inline — since the rest of the dependencies are still
+// useful to see.
 type TaskDependenciesResource struct {
 	tc taskcluster.Taskcluster
 }
@@ -29,7 +32,7 @@ func (r *TaskDependenciesResource) Description() string {
 }
 
 func (r *TaskDependenciesResource) Columns() []Column {
-	return []Column{{Title: "DEPENDENCY TASK ID"}}
+	return taskListColumns()
 }
 
 // List is never expected to be called via normal navigation — the shell
@@ -38,35 +41,66 @@ func (r *TaskDependenciesResource) List() ([]Row, error) {
 	return nil, fmt.Errorf("dependencies requires a task scope")
 }
 
+const maxDependencyFetchConcurrency = 16
+
 func (r *TaskDependenciesResource) ScopedList(taskID string) ([]Row, error) {
 	task, err := r.tc.GetTask(taskID)
 	if err != nil {
 		return nil, err
 	}
 
-	rows := make([]Row, 0, len(task.Dependencies))
-	for _, depID := range task.Dependencies {
-		rows = append(rows, Row{
-			ID:        depID,
-			Cells:     []string{depID},
-			NavTarget: &NavTarget{ResourceName: "task", ID: depID, Kind: NavDetail},
-		})
+	rows := make([]Row, len(task.Dependencies))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxDependencyFetchConcurrency)
+
+	for i, depID := range task.Dependencies {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, depID string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			rows[i] = dependencyRow(r.tc, depID)
+		}(i, depID)
 	}
+	wg.Wait()
 
 	return rows, nil
+}
+
+// dependencyRow fetches one dependency's task+status and renders it in the
+// same shape as taskListRows — but per-row rather than in bulk, since
+// dependencies must be fetched one ID at a time (see the type doc comment).
+// A fetch failure shows inline as "(failed to load)" for whichever fields
+// couldn't be fetched, rather than dropping the row or failing the list.
+func dependencyRow(tc taskcluster.Taskcluster, depID string) Row {
+	task, err := tc.GetTask(depID)
+	if err != nil {
+		return Row{ID: depID, Cells: []string{depID, "(failed to load)", "", "", ""}}
+	}
+
+	name := task.Metadata.Name
+	workerPool := task.ProvisionerID + "/" + task.WorkerType
+	age := formatAge(time.Time(task.Created))
+
+	status, err := tc.GetTaskStatus(depID)
+	if err != nil {
+		return Row{ID: depID, Cells: []string{depID, name, "(failed to load)", workerPool, age}}
+	}
+
+	return Row{ID: depID, Cells: []string{depID, name, status.State, workerPool, age}}
 }
 
 func (r *TaskDependenciesResource) EmptyScopeResource() string {
 	return "task"
 }
 
-// Describe is unreachable in normal use — see the type doc comment.
-// Implemented only to satisfy the Resource interface.
 func (r *TaskDependenciesResource) Describe(id string) (Detail, error) {
-	return Detail{}, fmt.Errorf("dependency entries are not viewable directly")
+	return describeTask(r.tc, id)
 }
 
-func (r *TaskDependenciesResource) RefreshInterval() time.Duration { return 0 }
+func (r *TaskDependenciesResource) RefreshInterval() time.Duration {
+	return 15 * time.Second
+}
 
 // ListWebURL links to the scoped task's own page — there's no dedicated
 // dependencies page in the web UI (dependencies are shown inline on a task's
@@ -75,8 +109,9 @@ func (r *TaskDependenciesResource) ListWebURL(rootURL, scope string) string {
 	return taskWebURL(rootURL, scope)
 }
 
-// DetailWebURL is never expected to be called — see Describe's doc comment.
-func (r *TaskDependenciesResource) DetailWebURL(rootURL, id string) string { return "" }
+func (r *TaskDependenciesResource) DetailWebURL(rootURL, id string) string {
+	return taskWebURL(rootURL, id)
+}
 
 // TaskDependentsResource lists tasks that declare the scoped task as one of
 // their own dependencies — the reverse direction of

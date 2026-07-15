@@ -109,6 +109,18 @@ func (r *TaskRunsResource) Describe(id string) (Detail, error) {
 			},
 		})
 	}
+	// Always shown, like describeTask's own 'a' action — artifacts is
+	// scoped by task (tabbing over whichever runs exist), not by this one
+	// run, so there's nothing to gate on here either.
+	actions = append(actions, DetailAction{
+		Key:   'a',
+		Label: "artifacts",
+		Target: NavTarget{
+			ResourceName: "artifacts",
+			ID:           taskID,
+			Kind:         NavScopedList,
+		},
+	})
 
 	return Detail{
 		Title:   fmt.Sprintf("Task :: %s (%s) :: Run %d", task.Metadata.Name, taskID, runID),

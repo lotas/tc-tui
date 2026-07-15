@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	tcurls "github.com/taskcluster/taskcluster-lib-urls"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcworkermanager"
@@ -56,6 +59,7 @@ type Taskcluster interface {
 	GetPendingTasks(taskQueueID string) (PendingTaskList, error)
 	GetClaimedTasks(taskQueueID string) (ClaimedTaskList, error)
 	GetArtifacts(taskID string, runID int64) (ArtifactList, error)
+	GetArtifactContent(taskID string, runID int64, name string) (string, error)
 }
 
 type TC struct {
@@ -499,6 +503,28 @@ func (tc *TC) GetArtifacts(taskID string, runID int64) (ArtifactList, error) {
 	}
 
 	return ArtifactList(artifacts), nil
+}
+
+// GetArtifactContent fetches the raw content of one artifact. The queue's
+// "artifact" endpoint responds with either the content itself or a redirect
+// to it depending on storage type; a plain http.Get follows that redirect
+// automatically, so no response-body parsing is needed either way. When
+// authenticated, a signed URL is used so private artifacts are readable too;
+// anonymously, the plain API URL relies on the artifact's own anonymous
+// scopes (e.g. "public/..." artifacts).
+func (tc *TC) GetArtifactContent(taskID string, runID int64, name string) (string, error) {
+	runIDStr := strconv.FormatInt(runID, 10)
+
+	if tc.IsAuthenticated() {
+		signedURL, err := tc.queue.GetArtifact_SignedURL(taskID, runIDStr, name, 60*time.Second)
+		if err != nil {
+			return "", err
+		}
+		return getHttpResponse(signedURL.String())
+	}
+
+	route := fmt.Sprintf("task/%s/runs/%s/artifacts/%s", url.PathEscape(taskID), url.PathEscape(runIDStr), url.PathEscape(name))
+	return getHttpResponse(tcurls.API(tc.tcRoot, "queue", "v1", route))
 }
 
 func (tc *TC) GetRoot() string {

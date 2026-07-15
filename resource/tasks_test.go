@@ -51,8 +51,8 @@ func TestTaskResourceDescribe(t *testing.T) {
 	if !strings.Contains(detail.Body, "build-linux") || !strings.Contains(detail.Body, "completed") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}
-	if len(detail.Actions) != 5 {
-		t.Fatalf("expected 5 actions, got %d", len(detail.Actions))
+	if len(detail.Actions) != 6 {
+		t.Fatalf("expected 6 actions, got %d", len(detail.Actions))
 	}
 	workerPoolAction := detail.Actions[0]
 	if workerPoolAction.Key != 'W' || workerPoolAction.Target.ResourceName != "workerpools" ||
@@ -78,6 +78,11 @@ func TestTaskResourceDescribe(t *testing.T) {
 	if runsAction.Key != 'R' || runsAction.Target.ResourceName != "runs" ||
 		runsAction.Target.ID != "task-1" || runsAction.Target.Kind != NavScopedList {
 		t.Fatalf("unexpected action: %+v", runsAction)
+	}
+	artifactsAction := detail.Actions[5]
+	if artifactsAction.Key != 'a' || artifactsAction.Target.ResourceName != "artifacts" ||
+		artifactsAction.Target.ID != "task-1" || artifactsAction.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action: %+v", artifactsAction)
 	}
 }
 
@@ -123,12 +128,16 @@ func TestTaskResourceDescribeAlwaysShowsDependentsAction(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(detail.Actions) != 3 {
-		t.Fatalf("expected 3 actions (worker pool + task group + dependents, no dependencies), got %d", len(detail.Actions))
+	if len(detail.Actions) != 4 {
+		t.Fatalf("expected 4 actions (worker pool + task group + dependents + artifacts, no dependencies), got %d", len(detail.Actions))
 	}
 	dependentsAction := detail.Actions[2]
 	if dependentsAction.Key != 'D' || dependentsAction.Target.ResourceName != "dependents" {
 		t.Fatalf("unexpected action: %+v", dependentsAction)
+	}
+	artifactsAction := detail.Actions[3]
+	if artifactsAction.Key != 'a' || artifactsAction.Target.ResourceName != "artifacts" {
+		t.Fatalf("unexpected action: %+v", artifactsAction)
 	}
 }
 

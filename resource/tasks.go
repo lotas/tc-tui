@@ -236,6 +236,19 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 			},
 		})
 	}
+	// Always shown, like dependents — TaskArtifactsResource is scoped by
+	// task (not by a single run), tabbing over whichever runs exist, so
+	// there's no need to gate this on run count the way 'R' is; selecting it
+	// for a task with no runs yet just lands on an empty list.
+	actions = append(actions, DetailAction{
+		Key:   'a',
+		Label: "artifacts",
+		Target: NavTarget{
+			ResourceName: "artifacts",
+			ID:           taskID,
+			Kind:         NavScopedList,
+		},
+	})
 
 	return Detail{
 		Title:   fmt.Sprintf("Task :: %s (%s)", task.Metadata.Name, taskID),

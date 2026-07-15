@@ -93,6 +93,9 @@ type fakeTaskcluster struct {
 
 	artifacts    taskcluster.ArtifactList
 	artifactsErr error
+
+	artifactContent    string
+	artifactContentErr error
 }
 
 func (f *fakeTaskcluster) GetVersion() taskcluster.Version { return taskcluster.Version{} }
@@ -196,4 +199,8 @@ func (f *fakeTaskcluster) GetClaimedTasks(taskQueueID string) (taskcluster.Claim
 
 func (f *fakeTaskcluster) GetArtifacts(taskID string, runID int64) (taskcluster.ArtifactList, error) {
 	return f.artifacts, f.artifactsErr
+}
+
+func (f *fakeTaskcluster) GetArtifactContent(taskID string, runID int64, name string) (string, error) {
+	return f.artifactContent, f.artifactContentErr
 }

@@ -10,8 +10,12 @@ import (
 func TestTaskDependenciesResourceScopedListReturnsNavigableRows(t *testing.T) {
 	fake := &fakeTaskcluster{
 		task: &tcqueue.TaskDefinitionResponse{
-			Dependencies: []string{"dep-1", "dep-2"},
+			Metadata:      tcqueue.TaskMetadata{Name: "dep-task"},
+			ProvisionerID: "gcp",
+			WorkerType:    "pool-a",
+			Dependencies:  []string{"dep-1", "dep-2"},
 		},
+		taskStatus: &tcqueue.TaskStatusStructure{State: "completed"},
 	}
 	res := NewTaskDependenciesResource(fake)
 
@@ -23,14 +27,18 @@ func TestTaskDependenciesResourceScopedListReturnsNavigableRows(t *testing.T) {
 		t.Fatalf("expected 2 rows, got %d", len(rows))
 	}
 
+	// The fake returns the same task+status regardless of which ID was
+	// requested, so both dependency rows resolve to the same name/state/pool
+	// — what matters here is that each row still keys off its own dependency
+	// ID and gets the richer shape, not a raw ID-only row.
 	for i, depID := range []string{"dep-1", "dep-2"} {
 		row := rows[i]
-		if row.ID != depID || row.Cells[0] != depID {
+		if row.ID != depID || row.Cells[0] != depID || row.Cells[1] != "dep-task" ||
+			row.Cells[2] != "completed" || row.Cells[3] != "gcp/pool-a" {
 			t.Fatalf("unexpected row %d: %+v", i, row)
 		}
-		if row.NavTarget == nil || row.NavTarget.ResourceName != "task" ||
-			row.NavTarget.ID != depID || row.NavTarget.Kind != NavDetail {
-			t.Fatalf("unexpected NavTarget for row %d: %+v", i, row.NavTarget)
+		if row.NavTarget != nil {
+			t.Fatalf("expected no NavTarget override — default selection should call Describe directly, got %+v", row.NavTarget)
 		}
 	}
 }
@@ -49,6 +57,43 @@ func TestTaskDependenciesResourceListRequiresScope(t *testing.T) {
 
 	if _, err := res.List(); err == nil {
 		t.Fatalf("expected an error for an unscoped List call")
+	}
+}
+
+func TestDependencyRowShowsFailureInlineOnFetchError(t *testing.T) {
+	fake := &fakeTaskcluster{taskErr: errors.New("boom")}
+
+	row := dependencyRow(fake, "dep-1")
+	if row.ID != "dep-1" || row.Cells[0] != "dep-1" || row.Cells[1] != "(failed to load)" {
+		t.Fatalf("unexpected row: %+v", row)
+	}
+}
+
+func TestDependencyRowShowsFailureInlineOnStatusFetchError(t *testing.T) {
+	fake := &fakeTaskcluster{
+		task:          &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "dep-task"}},
+		taskStatusErr: errors.New("boom"),
+	}
+
+	row := dependencyRow(fake, "dep-1")
+	if row.ID != "dep-1" || row.Cells[1] != "dep-task" || row.Cells[2] != "(failed to load)" {
+		t.Fatalf("unexpected row: %+v", row)
+	}
+}
+
+func TestTaskDependenciesResourceDescribeDelegatesToTaskDetail(t *testing.T) {
+	fake := &fakeTaskcluster{
+		task:       &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "dep-task"}},
+		taskStatus: &tcqueue.TaskStatusStructure{},
+	}
+	res := NewTaskDependenciesResource(fake)
+
+	detail, err := res.Describe("dep-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if detail.Title != "Task :: dep-task (dep-1)" {
+		t.Fatalf("unexpected title: %s", detail.Title)
 	}
 }
 

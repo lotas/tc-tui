@@ -82,13 +82,36 @@ func TestTaskRunsResourceDescribeIncludesWorkerActionWhenAssigned(t *testing.T) 
 	if detail.Title != "Task :: build-linux (task-1) :: Run 0" {
 		t.Fatalf("unexpected title: %s", detail.Title)
 	}
-	if len(detail.Actions) != 1 {
-		t.Fatalf("expected 1 action, got %d: %+v", len(detail.Actions), detail.Actions)
+	if len(detail.Actions) != 2 {
+		t.Fatalf("expected 2 actions (worker + artifacts), got %d: %+v", len(detail.Actions), detail.Actions)
 	}
 	action := detail.Actions[0]
 	if action.Key != 'w' || action.Target.ResourceName != "workers" ||
 		action.Target.ID != "gcp/pool-a::us-west1::i-1234" || action.Target.Kind != NavDetail {
 		t.Fatalf("unexpected worker action: %+v", action)
+	}
+}
+
+func TestTaskRunsResourceDescribeAlwaysIncludesArtifactsAction(t *testing.T) {
+	fake := &fakeTaskcluster{
+		task: &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build-linux"}},
+		taskStatus: &tcqueue.TaskStatusStructure{
+			Runs: []tcqueue.RunInformation{{RunID: 0, State: "pending"}},
+		},
+	}
+	res := NewTaskRunsResource(fake)
+
+	detail, err := res.Describe("task-1/0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(detail.Actions) != 1 {
+		t.Fatalf("expected 1 action, got %d: %+v", len(detail.Actions), detail.Actions)
+	}
+	action := detail.Actions[0]
+	if action.Key != 'a' || action.Target.ResourceName != "artifacts" ||
+		action.Target.ID != "task-1" || action.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected artifacts action: %+v", action)
 	}
 }
 
@@ -105,8 +128,10 @@ func TestTaskRunsResourceDescribeOmitsWorkerActionWithoutOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(detail.Actions) != 0 {
-		t.Fatalf("expected no actions, got %+v", detail.Actions)
+	for _, a := range detail.Actions {
+		if a.Key == 'w' {
+			t.Fatalf("expected no 'w' action without an assigned worker, got %+v", detail.Actions)
+		}
 	}
 }
 
