@@ -4,7 +4,9 @@ import (
 	"regexp"
 
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcindex"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcsecrets"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcworkermanager"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
@@ -101,6 +103,26 @@ type fakeTaskcluster struct {
 
 	artifactURL    string
 	artifactURLErr error
+
+	clients    taskcluster.ClientList
+	clientsErr error
+	client     *tcauth.GetClientResponse
+	clientErr  error
+
+	secrets    []string
+	secretsErr error
+	secret     *tcsecrets.Secret
+	secretErr  error
+
+	purgeCacheRequestsForPool    taskcluster.PurgeCacheRequestList
+	purgeCacheRequestsForPoolErr error
+
+	indexNamespaces    taskcluster.IndexNamespaceList
+	indexNamespacesErr error
+	indexTasks         taskcluster.IndexTaskList
+	indexTasksErr      error
+	findIndexedTask    *tcindex.IndexedTaskResponse
+	findIndexedTaskErr error
 }
 
 func (f *fakeTaskcluster) GetVersion() taskcluster.Version { return taskcluster.Version{} }
@@ -212,4 +234,36 @@ func (f *fakeTaskcluster) GetArtifactContent(taskID string, runID int64, name st
 
 func (f *fakeTaskcluster) GetArtifactURL(taskID string, runID int64, name string) (string, error) {
 	return f.artifactURL, f.artifactURLErr
+}
+
+func (f *fakeTaskcluster) GetClients() (taskcluster.ClientList, error) {
+	return f.clients, f.clientsErr
+}
+
+func (f *fakeTaskcluster) GetClient(clientID string) (*tcauth.GetClientResponse, error) {
+	return f.client, f.clientErr
+}
+
+func (f *fakeTaskcluster) GetSecrets() ([]string, error) {
+	return f.secrets, f.secretsErr
+}
+
+func (f *fakeTaskcluster) GetSecret(name string) (*tcsecrets.Secret, error) {
+	return f.secret, f.secretErr
+}
+
+func (f *fakeTaskcluster) GetPurgeCacheRequestsForPool(workerPoolID string) (taskcluster.PurgeCacheRequestList, error) {
+	return f.purgeCacheRequestsForPool, f.purgeCacheRequestsForPoolErr
+}
+
+func (f *fakeTaskcluster) GetIndexNamespaces(namespace string) (taskcluster.IndexNamespaceList, error) {
+	return f.indexNamespaces, f.indexNamespacesErr
+}
+
+func (f *fakeTaskcluster) GetIndexTasks(namespace string) (taskcluster.IndexTaskList, error) {
+	return f.indexTasks, f.indexTasksErr
+}
+
+func (f *fakeTaskcluster) FindIndexedTask(indexPath string) (*tcindex.IndexedTaskResponse, error) {
+	return f.findIndexedTask, f.findIndexedTaskErr
 }

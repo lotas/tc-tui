@@ -171,8 +171,8 @@ func TestWorkerPoolsResourceDescribe(t *testing.T) {
 	if detail.Title != "Worker Pool :: proj/pool-a" {
 		t.Fatalf("unexpected title: %s", detail.Title)
 	}
-	if len(detail.Actions) != 5 {
-		t.Fatalf("expected 5 actions, got %d", len(detail.Actions))
+	if len(detail.Actions) != 6 {
+		t.Fatalf("expected 6 actions, got %d", len(detail.Actions))
 	}
 	if a := detail.Actions[0]; a.Key != 'w' || a.Target.ResourceName != "workers" ||
 		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
@@ -193,6 +193,10 @@ func TestWorkerPoolsResourceDescribe(t *testing.T) {
 	if a := detail.Actions[4]; a.Key != 'e' || a.Target.ResourceName != "errors" ||
 		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
 		t.Fatalf("unexpected action[4]: %+v", a)
+	}
+	if a := detail.Actions[5]; a.Key != 'P' || a.Target.ResourceName != "purgecache" ||
+		a.Target.ID != "proj/pool-a" || a.Target.Kind != NavScopedList {
+		t.Fatalf("unexpected action[5]: %+v", a)
 	}
 	body := stripRegionTags(detail.Body)
 	if !strings.Contains(body, "a pool") || !strings.Contains(body, "owner@example.com") {
@@ -356,11 +360,11 @@ func TestWorkerPoolsResourceRefreshInterval(t *testing.T) {
 	}
 }
 
-func TestWorkerPoolActionsWithNoExclusionReturnsAllSix(t *testing.T) {
+func TestWorkerPoolActionsWithNoExclusionReturnsAllSeven(t *testing.T) {
 	actions := workerPoolActions("proj/pool-a", "")
 
-	if len(actions) != 6 {
-		t.Fatalf("expected all 6 actions, got %d: %+v", len(actions), actions)
+	if len(actions) != 7 {
+		t.Fatalf("expected all 7 actions, got %d: %+v", len(actions), actions)
 	}
 	for _, a := range actions {
 		if a.Target.ID != "proj/pool-a" {
@@ -379,8 +383,8 @@ func TestWorkerPoolActionsWithNoExclusionReturnsAllSix(t *testing.T) {
 func TestWorkerPoolActionsExcludesGivenResource(t *testing.T) {
 	actions := workerPoolActions("proj/pool-a", "workers")
 
-	if len(actions) != 5 {
-		t.Fatalf("expected 5 actions (6 minus excluded), got %d: %+v", len(actions), actions)
+	if len(actions) != 6 {
+		t.Fatalf("expected 6 actions (7 minus excluded), got %d: %+v", len(actions), actions)
 	}
 	for _, a := range actions {
 		if a.Target.ResourceName == "workers" {
@@ -389,10 +393,21 @@ func TestWorkerPoolActionsExcludesGivenResource(t *testing.T) {
 	}
 }
 
-func TestWorkerPoolActionsWithUnmatchedExcludeReturnsAllSix(t *testing.T) {
+func TestWorkerPoolActionsWithUnmatchedExcludeReturnsAllSeven(t *testing.T) {
 	actions := workerPoolActions("proj/pool-a", "not-a-real-resource")
 
-	if len(actions) != 6 {
-		t.Fatalf("expected an unmatched exclude to leave all 6 actions, got %d: %+v", len(actions), actions)
+	if len(actions) != 7 {
+		t.Fatalf("expected an unmatched exclude to leave all 7 actions, got %d: %+v", len(actions), actions)
 	}
+}
+
+func TestWorkerPoolActionsIncludesPurgeCache(t *testing.T) {
+	actions := workerPoolActions("proj/pool-a", "")
+
+	for _, a := range actions {
+		if a.Key == 'P' && a.Target.ResourceName == "purgecache" && a.Target.Kind == NavScopedList {
+			return
+		}
+	}
+	t.Fatalf("expected a 'P' purgecache action, got: %+v", actions)
 }

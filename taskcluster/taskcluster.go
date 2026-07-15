@@ -2,6 +2,7 @@ package taskcluster
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -13,8 +14,12 @@ import (
 	"time"
 
 	tcurls "github.com/taskcluster/taskcluster-lib-urls"
+	tcclient "github.com/taskcluster/taskcluster/v101/clients/client-go"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcindex"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcpurgecache"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcsecrets"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcworkermanager"
 )
 
@@ -23,12 +28,16 @@ const PageSize = "150"
 type RolesList []tcauth.GetRoleResponse
 type WorkerPoolList []tcworkermanager.WorkerPoolFullDefinition
 type WorkerList []tcworkermanager.WorkerFullDefinition
-type TaskGroupTaskList []tcqueue.TaskDefinitionAndStatus   // ListTaskGroup's members
-type PendingTaskList []tcqueue.Var3                        // ListPendingTasks' members
-type ClaimedTaskList []tcqueue.Var4                        // ListClaimedTasks' members
-type WorkerPoolLaunchConfigList []tcworkermanager.Var1     // ListWorkerPoolLaunchConfigs' members
-type WorkerPoolErrorList []tcworkermanager.WorkerPoolError // ListWorkerPoolErrors' members
-type ArtifactList []tcqueue.Artifact                       // ListArtifacts' members
+type TaskGroupTaskList []tcqueue.TaskDefinitionAndStatus          // ListTaskGroup's members
+type PendingTaskList []tcqueue.Var3                               // ListPendingTasks' members
+type ClaimedTaskList []tcqueue.Var4                               // ListClaimedTasks' members
+type WorkerPoolLaunchConfigList []tcworkermanager.Var1            // ListWorkerPoolLaunchConfigs' members
+type WorkerPoolErrorList []tcworkermanager.WorkerPoolError        // ListWorkerPoolErrors' members
+type ArtifactList []tcqueue.Artifact                              // ListArtifacts' members
+type ClientList []tcauth.GetClientResponse                        // ListClients' members
+type PurgeCacheRequestList []tcpurgecache.PurgeCacheRequestsEntry // PurgeRequests' members
+type IndexNamespaceList []tcindex.Namespace                       // ListNamespaces' members
+type IndexTaskList []tcindex.Task                                 // ListTasks' members
 
 type Taskcluster interface {
 	GetVersion() Version
@@ -62,12 +71,27 @@ type Taskcluster interface {
 	GetArtifacts(taskID string, runID int64) (ArtifactList, error)
 	GetArtifactContent(taskID string, runID int64, name string) (content string, contentType string, truncated bool, err error)
 	GetArtifactURL(taskID string, runID int64, name string) (string, error)
+
+	GetClients() (ClientList, error)
+	GetClient(clientID string) (*tcauth.GetClientResponse, error)
+
+	GetSecrets() ([]string, error)
+	GetSecret(name string) (*tcsecrets.Secret, error)
+
+	GetPurgeCacheRequestsForPool(workerPoolID string) (PurgeCacheRequestList, error)
+
+	GetIndexNamespaces(namespace string) (IndexNamespaceList, error)
+	GetIndexTasks(namespace string) (IndexTaskList, error)
+	FindIndexedTask(indexPath string) (*tcindex.IndexedTaskResponse, error)
 }
 
 type TC struct {
-	auth  *tcauth.Auth
-	wm    *tcworkermanager.WorkerManager
-	queue *tcqueue.Queue
+	auth       *tcauth.Auth
+	wm         *tcworkermanager.WorkerManager
+	queue      *tcqueue.Queue
+	secrets    *tcsecrets.Secrets
+	purgeCache *tcpurgecache.PurgeCache
+	index      *tcindex.Index
 
 	tcRoot string
 }
@@ -81,9 +105,12 @@ type Version struct {
 
 func NewTaskcluster() Taskcluster {
 	tc := &TC{
-		auth:  tcauth.NewFromEnv(),
-		wm:    tcworkermanager.NewFromEnv(),
-		queue: tcqueue.NewFromEnv(),
+		auth:       tcauth.NewFromEnv(),
+		wm:         tcworkermanager.NewFromEnv(),
+		queue:      tcqueue.NewFromEnv(),
+		secrets:    tcsecrets.NewFromEnv(),
+		purgeCache: tcpurgecache.NewFromEnv(),
+		index:      tcindex.NewFromEnv(),
 	}
 
 	tc.tcRoot = tc.auth.RootURL
@@ -566,6 +593,118 @@ func (tc *TC) GetArtifactContent(taskID string, runID int64, name string) (conte
 // between generating it and the user actually loading it.
 func (tc *TC) GetArtifactURL(taskID string, runID int64, name string) (string, error) {
 	return tc.artifactURL(taskID, runID, name, 5*time.Minute)
+}
+
+// GetClients lists every auth client (credential) in the deployment.
+func (tc *TC) GetClients() (ClientList, error) {
+	clients, err := paginate(func(cont string) ([]tcauth.GetClientResponse, string, error) {
+		resp, err := tc.auth.ListClients(cont, PageSize, "")
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Clients, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return ClientList(clients), nil
+}
+
+func (tc *TC) GetClient(clientID string) (*tcauth.GetClientResponse, error) {
+	return tc.auth.Client(clientID)
+}
+
+// GetSecrets lists every secret's name — the bulk list API never returns
+// values, only names, so there's no need for a wrapper type beyond []string.
+func (tc *TC) GetSecrets() ([]string, error) {
+	names, err := paginate(func(cont string) ([]string, string, error) {
+		resp, err := tc.secrets.List(cont, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Secrets, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return names, nil
+}
+
+func (tc *TC) GetSecret(name string) (*tcsecrets.Secret, error) {
+	return tc.secrets.Get(name)
+}
+
+// GetPurgeCacheRequestsForPool lists open purge-cache requests for one
+// worker pool. Unlike AllPurgeRequests, this endpoint has no continuation
+// token — a single call returns everything.
+func (tc *TC) GetPurgeCacheRequestsForPool(workerPoolID string) (PurgeCacheRequestList, error) {
+	resp, err := tc.purgeCache.PurgeRequests(workerPoolID, "")
+	if err != nil {
+		return nil, err
+	}
+
+	return PurgeCacheRequestList(resp.Requests), nil
+}
+
+func (tc *TC) GetIndexNamespaces(namespace string) (IndexNamespaceList, error) {
+	namespaces, err := paginate(func(cont string) ([]tcindex.Namespace, string, error) {
+		resp, err := tc.index.ListNamespaces(namespace, cont, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Namespaces, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return IndexNamespaceList(namespaces), nil
+}
+
+func (tc *TC) GetIndexTasks(namespace string) (IndexTaskList, error) {
+	tasks, err := paginate(func(cont string) ([]tcindex.Task, string, error) {
+		resp, err := tc.index.ListTasks(namespace, cont, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Tasks, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return IndexTaskList(tasks), nil
+}
+
+// FindIndexedTask resolves an exact, full index path to its currently
+// indexed task. A 404 (no task indexed at this exact path) is reported as
+// (nil, nil) rather than an error — callers use this to distinguish "this
+// looks like a namespace to browse, not a leaf path" from a real fetch
+// failure.
+func (tc *TC) FindIndexedTask(indexPath string) (*tcindex.IndexedTaskResponse, error) {
+	task, err := tc.index.FindTask(indexPath)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return task, nil
+}
+
+// isNotFound reports whether err is a Taskcluster API error with a 404
+// response — used by FindIndexedTask to treat "not found" as an expected
+// outcome rather than a failure.
+func isNotFound(err error) bool {
+	var apiErr *tcclient.APICallException
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.CallSummary != nil && apiErr.CallSummary.HTTPResponse != nil &&
+		apiErr.CallSummary.HTTPResponse.StatusCode == 404
 }
 
 func (tc *TC) GetRoot() string {

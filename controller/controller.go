@@ -37,6 +37,10 @@ func NewController() TcController {
 
 	registry := resource.NewRegistry()
 	registry.Register(resource.NewRolesResource(tc))
+	registry.Register(resource.NewClientsResource(tc))
+	registry.Register(resource.NewSecretsResource(tc))
+	registry.Register(resource.NewPurgeCacheResource(tc))
+	registry.Register(resource.NewTaskIndexResource(tc))
 	registry.Register(resource.NewWorkerPoolsResource(tc))
 	registry.Register(resource.NewWorkersResource(tc))
 	registry.Register(resource.NewWorkerRecentTasksResource(tc))

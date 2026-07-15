@@ -103,8 +103,8 @@ func TestErrorsResourceDescribe(t *testing.T) {
 	if !strings.Contains(body, "launch failed") || !strings.Contains(body, "something went wrong") {
 		t.Fatalf("unexpected body: %s", detail.Body)
 	}
-	if len(detail.Actions) != 5 {
-		t.Fatalf("expected 5 sibling actions, got %d: %+v", len(detail.Actions), detail.Actions)
+	if len(detail.Actions) != 6 {
+		t.Fatalf("expected 6 sibling actions, got %d: %+v", len(detail.Actions), detail.Actions)
 	}
 }
 
@@ -146,8 +146,8 @@ func TestErrorsResourceScopeActionsExcludesErrors(t *testing.T) {
 	res := NewErrorsResource(&fakeTaskcluster{})
 
 	actions := res.ScopeActions("gcp/pool-a")
-	if len(actions) != 5 {
-		t.Fatalf("expected 5 actions, got %d: %+v", len(actions), actions)
+	if len(actions) != 6 {
+		t.Fatalf("expected 6 actions, got %d: %+v", len(actions), actions)
 	}
 	for _, a := range actions {
 		if a.Target.ResourceName == "errors" {

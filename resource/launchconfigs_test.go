@@ -227,8 +227,8 @@ func TestLaunchConfigsResourceScopeActionsExcludesLaunchConfigs(t *testing.T) {
 	res := NewLaunchConfigsResource(&fakeTaskcluster{})
 
 	actions := res.ScopeActions("gcp/pool-a")
-	if len(actions) != 5 {
-		t.Fatalf("expected 5 actions, got %d: %+v", len(actions), actions)
+	if len(actions) != 6 {
+		t.Fatalf("expected 6 actions, got %d: %+v", len(actions), actions)
 	}
 	for _, a := range actions {
 		if a.Target.ResourceName == "launchconfigs" {

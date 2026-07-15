@@ -181,7 +181,7 @@ func (r *WorkerPoolsResource) Augment(rows []Row, onUpdate func(rows []Row, comp
 // action whose ResourceName matches — typically the resource currently
 // showing the hints itself, since pressing its own key to "jump" to the
 // view already on screen isn't useful. If exclude doesn't match any of the
-// 6 ResourceNames (e.g. a typo), it has no effect and all 6 actions are
+// 7 ResourceNames (e.g. a typo), it has no effect and all 7 actions are
 // returned.
 func workerPoolActions(workerPoolID, exclude string) []DetailAction {
 	all := []DetailAction{
@@ -191,6 +191,7 @@ func workerPoolActions(workerPoolID, exclude string) []DetailAction {
 		{Key: 'c', Label: "claimed", Target: NavTarget{ResourceName: "claimed", ID: workerPoolID, Kind: NavScopedList}},
 		{Key: 'l', Label: "launchconfigs", Target: NavTarget{ResourceName: "launchconfigs", ID: workerPoolID, Kind: NavScopedList}},
 		{Key: 'e', Label: "errors", Target: NavTarget{ResourceName: "errors", ID: workerPoolID, Kind: NavScopedList}},
+		{Key: 'P', Label: "purge cache", Target: NavTarget{ResourceName: "purgecache", ID: workerPoolID, Kind: NavScopedList}},
 	}
 
 	actions := make([]DetailAction, 0, len(all))
