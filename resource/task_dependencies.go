@@ -87,7 +87,7 @@ func dependencyRow(tc taskcluster.Taskcluster, depID string) Row {
 		return Row{ID: depID, Cells: []string{depID, name, "(failed to load)", workerPool, age}}
 	}
 
-	return Row{ID: depID, Cells: []string{depID, name, status.State, workerPool, age}}
+	return Row{ID: depID, Cells: []string{depID, name, renderTaskState(status.State), workerPool, age}}
 }
 
 func (r *TaskDependenciesResource) EmptyScopeResource() string {

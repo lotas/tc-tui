@@ -31,6 +31,23 @@ func TestSortRowsTextAscendingCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestSortRowsTextIgnoresColorTags(t *testing.T) {
+	// A colored STATE cell like "[green]completed[white]" must sort by its
+	// visible text ("completed"), not by the raw string including tags —
+	// which would effectively sort by color name ("green" < "red" < "white"
+	// < "yellow") instead.
+	rows := []resource.Row{
+		{ID: "completed", Cells: []string{"[green]completed[white]"}},
+		{ID: "failed", Cells: []string{"[red]failed[white]"}},
+		{ID: "running", Cells: []string{"[yellow]running[white]"}},
+	}
+
+	sorted := SortRows(rows, SortState{Column: 0, Direction: SortAsc})
+	if sorted[0].ID != "completed" || sorted[1].ID != "failed" || sorted[2].ID != "running" {
+		t.Fatalf("expected [completed,failed,running] order, got %+v", sorted)
+	}
+}
+
 func TestSortRowsTextDescending(t *testing.T) {
 	rows := []resource.Row{
 		{ID: "a", Cells: []string{"alpha"}},

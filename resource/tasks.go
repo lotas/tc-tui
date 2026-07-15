@@ -123,7 +123,7 @@ func taskListRows(tasks taskcluster.TaskGroupTaskList) []Row {
 			Cells: []string{
 				t.Status.TaskID,
 				t.Task.Metadata.Name,
-				t.Status.State,
+				renderTaskState(t.Status.State),
 				t.Task.ProvisionerID + "/" + t.Task.WorkerType,
 				formatAge(time.Time(t.Task.Created)),
 			},
@@ -158,7 +158,7 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 		"[green]Name:[white] %s\n"+
 			"[green]Description:[white]\n%s\n\n"+
 			"%s\n"+
-			"[green]State:[blue] %s[white]\n"+
+			"[green]State:[%s] %s[white]\n"+
 			"%s\n"+
 			"[green]Payload:[white]\n%s\n\n"+
 			"%s\n"+
@@ -169,7 +169,7 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 		task.Metadata.Name,
 		renderMarkdown(task.Metadata.Description),
 		fieldRow(32, "Owner", task.Metadata.Owner, "Source", task.Metadata.Source),
-		status.State,
+		taskStateColor(status.State), status.State,
 		fieldRow(24, "Provisioner", task.ProvisionerID, "Worker Type", task.WorkerType, "Priority", task.Priority),
 		renderYAML(task.Payload),
 		fieldRow(30, "Created", fmt.Sprint(task.Created), "Deadline", fmt.Sprint(task.Deadline), "Expires", fmt.Sprint(task.Expires)),
@@ -251,7 +251,7 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 	})
 
 	return Detail{
-		Title:   fmt.Sprintf("Task :: %s (%s)", task.Metadata.Name, taskID),
+		Title:   fmt.Sprintf("Task :: %s%s (%s)", taskStateBadge(status.State), task.Metadata.Name, taskID),
 		Body:    body,
 		Actions: actions,
 	}, nil
@@ -262,7 +262,7 @@ func describeTask(tc taskcluster.Taskcluster, taskID string) (Detail, error) {
 // TaskRunsResource.Describe's single-run detail view (indent "").
 func renderRunBody(tc taskcluster.Taskcluster, taskID string, run tcqueue.RunInformation, indent string) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%srun %d: [blue]%s[white]", indent, run.RunID, run.State))
+	b.WriteString(fmt.Sprintf("%srun %d: [%s]%s[white]", indent, run.RunID, taskStateColor(run.State), run.State))
 	if run.ReasonResolved != "" {
 		b.WriteString(fmt.Sprintf(" (reason: %s)", run.ReasonResolved))
 	}

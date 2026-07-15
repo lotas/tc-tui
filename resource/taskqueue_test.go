@@ -77,7 +77,7 @@ func TestPendingTasksResourceDescribeDelegatesToDescribeTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if detail.Title != "Task :: build (task-1)" {
+	if detail.Title != "Task :: [white]pending[white] build (task-1)" {
 		t.Fatalf("unexpected title: %s", detail.Title)
 	}
 }
@@ -150,7 +150,7 @@ func TestClaimedTasksResourceDescribeDelegatesToDescribeTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if detail.Title != "Task :: build (task-1)" {
+	if detail.Title != "Task :: [yellow]running[white] build (task-1)" {
 		t.Fatalf("unexpected title: %s", detail.Title)
 	}
 }

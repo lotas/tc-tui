@@ -80,6 +80,47 @@ func formatAge(t time.Time) string {
 	return time.Since(t).Round(time.Second).String()
 }
 
+// taskStateColor maps a task/run state to a tview color name, so a task's
+// overall health reads at a glance (e.g. in the Detail title, always visible
+// above the fold) rather than requiring a scroll past a possibly-huge
+// payload down to the runs section to see if it succeeded or failed.
+func taskStateColor(state string) string {
+	switch state {
+	case "completed":
+		return "green"
+	case "failed", "exception":
+		return "red"
+	case "running":
+		return "yellow"
+	default: // "pending", "unscheduled"
+		return "white"
+	}
+}
+
+// renderTaskState colors state via taskStateColor, e.g. for a list's STATE
+// column or a run's inline state — anywhere the bare value itself (not a
+// label:value pair) needs the same color coding describeTask's title uses.
+// Empty state (a fetch-failure placeholder, or a test that doesn't bother
+// setting it) passes through unchanged rather than wrapping nothing in a
+// pointless color span.
+func renderTaskState(state string) string {
+	if state == "" {
+		return state
+	}
+	return fmt.Sprintf("[%s]%s[white]", taskStateColor(state), state)
+}
+
+// taskStateBadge renders state as a colored prefix (see renderTaskState) for
+// the Detail title, with a trailing space to separate it from whatever
+// follows (the task name). Empty state renders as "" rather than a bare
+// trailing space.
+func taskStateBadge(state string) string {
+	if state == "" {
+		return ""
+	}
+	return renderTaskState(state) + " "
+}
+
 // formatWorker renders a "group/id" worker pair — used by list columns for
 // runs that may not have a worker assigned yet (e.g. a pending run), which
 // would otherwise render as a bare "/".

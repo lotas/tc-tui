@@ -12,13 +12,24 @@ import (
 // view for the given resource name/alias — the `:` command bar's behavior.
 // If the resolved resource is a ScopedResource and no scope was given, it
 // redirects to that resource's EmptyScopeResource instead of attempting an
-// unscoped fetch.
+// unscoped fetch. The "history" resource is the one exception: it's pushed
+// instead (see below), so it doesn't discard the current screen.
 func (s *Shell) switchResource(nameOrAlias, scope string) {
 	res, ok := s.registry.Resolve(nameOrAlias)
 	if !ok {
 		s.showError(nameOrAlias, fmt.Errorf(
 			"unknown resource %q (available: %s)", nameOrAlias, strings.Join(s.registry.Names(), ", "),
 		), func() {})
+		return
+	}
+
+	// history is a navigational aid, not a destination in its own right —
+	// opening it should feel like a peek, not a fresh root. Pushed rather
+	// than reset so Esc returns to whatever screen was open before `:history`
+	// was run, instead of that screen being discarded from the stack.
+	if res.Name() == "history" {
+		s.stack.Push(View{ResourceName: res.Name(), Kind: ListKind})
+		s.renderList(res, "", false)
 		return
 	}
 
@@ -112,7 +123,17 @@ func (s *Shell) pushScopedList(resourceName, scope string) {
 // navigateTo executes a NavTarget the same way regardless of where it came
 // from — a Detail view's action keybinding or a list row's NavTarget
 // override (e.g. HistoryResource's rows).
+//
+// If history is the view being navigated away from, it's popped first so
+// the target replaces it on the stack instead of stacking on top of it —
+// otherwise Esc from the target would land back on history (itself pushed,
+// not reset, specifically so Esc could skip past it) rather than on
+// whatever screen was open before `:history` was run.
 func (s *Shell) navigateTo(target resource.NavTarget) {
+	if top, ok := s.stack.Top(); ok && top.ResourceName == "history" {
+		s.stack.Pop()
+	}
+
 	switch target.Kind {
 	case resource.NavScopedList:
 		s.pushScopedList(target.ResourceName, target.ID)

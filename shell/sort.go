@@ -1,12 +1,23 @@
 package shell
 
 import (
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/taskcluster/tc-tui/resource"
 )
+
+// colorTagRe matches tview's "[tag]" region/color markup — mirrors
+// resource.fieldTagRe. A cell like a colored STATE value ("[green]completed
+// [white]") must sort by its visible text, not by the tag bytes, or sorting
+// would effectively group rows by color name instead of by state.
+var colorTagRe = regexp.MustCompile(`\[[^][]*\]`)
+
+func stripColorTags(s string) string {
+	return colorTagRe.ReplaceAllString(s, "")
+}
 
 // SortDirection is the direction a list view is currently sorted in.
 type SortDirection int
@@ -53,7 +64,7 @@ func SortRows(rows []resource.Row, state SortState) []resource.Row {
 			return af < bf
 		}
 
-		al, bl := strings.ToLower(a), strings.ToLower(b)
+		al, bl := strings.ToLower(stripColorTags(a)), strings.ToLower(stripColorTags(b))
 		if state.Direction == SortDesc {
 			return al > bl
 		}

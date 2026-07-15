@@ -833,6 +833,68 @@ func TestSwitchResourceDirectScopedResourceWithIDPushesScopedList(t *testing.T) 
 	}
 }
 
+func TestSwitchResourceHistoryPushesRatherThanResets(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: "workerpools", aliases: []string{"wp"}})
+	registry.Register(fakeResource{name: "history", aliases: []string{"hist"}})
+	s := New(registry)
+
+	// Simulate having a screen open before `:history` is run.
+	s.switchResource("wp", "")
+
+	s.switchResource("history", "")
+
+	if got := s.stack.Len(); got != 2 {
+		t.Fatalf("expected history to be pushed onto the existing stack (len 2), got len %d", got)
+	}
+
+	top, ok := s.stack.Top()
+	if !ok || top.Kind != ListKind || top.ResourceName != "history" {
+		t.Fatalf("unexpected top view: %+v (ok=%v)", top, ok)
+	}
+
+	// Esc should return to the screen that was open before `:history`.
+	s.goBack()
+	top, ok = s.stack.Top()
+	if !ok || top.ResourceName != "workerpools" {
+		t.Fatalf("expected Esc from history to return to workerpools, got %+v (ok=%v)", top, ok)
+	}
+}
+
+func TestNavigateToFromHistoryReplacesHistoryInsteadOfStackingOnTopOfIt(t *testing.T) {
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: "workerpools", aliases: []string{"wp"}})
+	registry.Register(fakeDirectLookupResource{
+		fakeResource: fakeResource{name: "task"},
+		label:        "task id",
+	})
+	registry.Register(fakeResource{name: "history", aliases: []string{"hist"}})
+	s := New(registry)
+
+	// Open a screen, then `:history`, then jump to a row's target — as if
+	// the user picked a past visit from the history list.
+	s.switchResource("wp", "")
+	s.switchResource("history", "")
+	s.navigateTo(resource.NavTarget{ResourceName: "task", ID: "task-1", Kind: resource.NavDetail})
+
+	if got := s.stack.Len(); got != 2 {
+		t.Fatalf("expected history to be replaced rather than stacked under the target (len 2), got len %d: %+v",
+			got, s.stack.Views())
+	}
+
+	top, ok := s.stack.Top()
+	if !ok || top.Kind != DetailKind || top.ResourceName != "task" || top.SelectedID != "task-1" {
+		t.Fatalf("unexpected top view: %+v (ok=%v)", top, ok)
+	}
+
+	// Esc should skip history entirely and land back on workerpools.
+	s.goBack()
+	top, ok = s.stack.Top()
+	if !ok || top.ResourceName != "workerpools" {
+		t.Fatalf("expected Esc to skip history and return to workerpools, got %+v (ok=%v)", top, ok)
+	}
+}
+
 func TestSwitchResourceDirectScopedResourceWithoutIDOpensPrompt(t *testing.T) {
 	registry := resource.NewRegistry()
 	registry.Register(fakeDirectScopedResource{

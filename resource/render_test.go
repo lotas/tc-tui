@@ -35,6 +35,41 @@ func TestRenderYAMLMalformedInputFallsBackToRawText(t *testing.T) {
 	}
 }
 
+func TestTaskStateColor(t *testing.T) {
+	cases := map[string]string{
+		"completed":   "green",
+		"failed":      "red",
+		"exception":   "red",
+		"running":     "yellow",
+		"pending":     "white",
+		"unscheduled": "white",
+		"":            "white",
+	}
+	for state, want := range cases {
+		if got := taskStateColor(state); got != want {
+			t.Fatalf("taskStateColor(%q) = %q, want %q", state, got, want)
+		}
+	}
+}
+
+func TestRenderTaskState(t *testing.T) {
+	if got := renderTaskState("completed"); got != "[green]completed[white]" {
+		t.Fatalf("renderTaskState(completed) = %q", got)
+	}
+	if got := renderTaskState(""); got != "" {
+		t.Fatalf("renderTaskState(\"\") = %q, want \"\"", got)
+	}
+}
+
+func TestTaskStateBadge(t *testing.T) {
+	if got := taskStateBadge("failed"); got != "[red]failed[white] " {
+		t.Fatalf("taskStateBadge(failed) = %q", got)
+	}
+	if got := taskStateBadge(""); got != "" {
+		t.Fatalf("taskStateBadge(\"\") = %q, want \"\"", got)
+	}
+}
+
 func TestRenderMarkdownEmptyInputRendersNone(t *testing.T) {
 	if got := renderMarkdown("   "); got != "(none)" {
 		t.Fatalf("renderMarkdown(whitespace) = %q, want %q", got, "(none)")

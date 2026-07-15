@@ -45,7 +45,7 @@ func TestTaskResourceDescribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if detail.Title != "Task :: build-linux (task-1)" {
+	if detail.Title != "Task :: [green]completed[white] build-linux (task-1)" {
 		t.Fatalf("unexpected title: %s", detail.Title)
 	}
 	if !strings.Contains(detail.Body, "build-linux") || !strings.Contains(detail.Body, "completed") {
@@ -253,7 +253,7 @@ func TestTasksResourceScopedList(t *testing.T) {
 		t.Fatalf("unexpected id: %s", rows[0].ID)
 	}
 	if rows[0].Cells[0] != "task-1" || rows[0].Cells[1] != "build" ||
-		rows[0].Cells[2] != "pending" || rows[0].Cells[3] != "gcp/linux-b-large" {
+		rows[0].Cells[2] != "[white]pending[white]" || rows[0].Cells[3] != "gcp/linux-b-large" {
 		t.Fatalf("unexpected cells: %+v", rows[0].Cells)
 	}
 	if rows[0].Cells[4] == "" {
@@ -465,7 +465,7 @@ func TestTasksResourceDescribeDelegatesToDescribeTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if detail.Title != "Task :: build (task-1)" {
+	if detail.Title != "Task :: [green]completed[white] build (task-1)" {
 		t.Fatalf("unexpected title: %s", detail.Title)
 	}
 	if !strings.Contains(detail.Body, "build") || !strings.Contains(detail.Body, "completed") {

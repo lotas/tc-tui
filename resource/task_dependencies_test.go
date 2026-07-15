@@ -34,7 +34,7 @@ func TestTaskDependenciesResourceScopedListReturnsNavigableRows(t *testing.T) {
 	for i, depID := range []string{"dep-1", "dep-2"} {
 		row := rows[i]
 		if row.ID != depID || row.Cells[0] != depID || row.Cells[1] != "dep-task" ||
-			row.Cells[2] != "completed" || row.Cells[3] != "gcp/pool-a" {
+			row.Cells[2] != "[green]completed[white]" || row.Cells[3] != "gcp/pool-a" {
 			t.Fatalf("unexpected row %d: %+v", i, row)
 		}
 		if row.NavTarget != nil {
@@ -118,7 +118,7 @@ func TestTaskDependentsResourceScopedListReturnsTaskRows(t *testing.T) {
 
 	row := rows[0]
 	if row.ID != "dependent-task-1" || row.Cells[0] != "dependent-task-1" ||
-		row.Cells[1] != "dependent-1" || row.Cells[2] != "pending" {
+		row.Cells[1] != "dependent-1" || row.Cells[2] != "[white]pending[white]" {
 		t.Fatalf("unexpected row: %+v", row)
 	}
 	if row.NavTarget != nil {
