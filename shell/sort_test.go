@@ -135,6 +135,23 @@ func TestSortRowsDescendingWithDuplicateValuesIsStable(t *testing.T) {
 	}
 }
 
+func TestSortRowsByteSizeAscendingSortsByMagnitudeNotText(t *testing.T) {
+	// Mirrors resource.formatBytes' rendering (e.g. TaskArtifactsResource's
+	// SIZE column) — lexical order would wrongly put "2.0 KiB" before
+	// "500 B" and "4.2 MiB" before "800 KiB".
+	rows := []resource.Row{
+		{ID: "a", Cells: []string{"4.2 MiB"}},
+		{ID: "b", Cells: []string{"500 B"}},
+		{ID: "c", Cells: []string{"2.0 KiB"}},
+		{ID: "d", Cells: []string{"800 KiB"}},
+	}
+
+	sorted := SortRows(rows, SortState{Column: 0, Direction: SortAsc})
+	if sorted[0].ID != "b" || sorted[1].ID != "c" || sorted[2].ID != "d" || sorted[3].ID != "a" {
+		t.Fatalf("expected magnitude order [b,c,d,a] (500B,2.0KiB,800KiB,4.2MiB), got %+v", sorted)
+	}
+}
+
 func TestSortRowsNumericDescendingWithDuplicateValuesIsStable(t *testing.T) {
 	rows := []resource.Row{
 		{ID: "first", Cells: []string{"5"}},

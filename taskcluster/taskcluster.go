@@ -508,14 +508,19 @@ func (tc *TC) GetArtifacts(taskID string, runID int64) (ArtifactList, error) {
 // GetArtifactContent fetches the raw content of one artifact. The queue's
 // "artifact" endpoint responds with either the content itself or a redirect
 // to it depending on storage type; a plain http.Get follows that redirect
-// automatically, so no response-body parsing is needed either way. When
-// authenticated, a signed URL is used so private artifacts are readable too;
-// anonymously, the plain API URL relies on the artifact's own anonymous
-// scopes (e.g. "public/..." artifacts).
+// automatically, so no response-body parsing is needed either way. A signed
+// URL is only built when actual credentials are configured — matching the
+// Taskcluster web UI's own getArtifactUrl (buildSignedUrlSync only when
+// user.credentials is set, buildUrl otherwise) — since IsAuthenticated
+// checks whether currentScopes succeeds, which it does even anonymously (the
+// anonymous role's own scopes), so it can't be used to decide this: signing
+// with empty client ID/access token produces a bewit missing its id/mac
+// fields, which the queue rejects with "Missing bewit attributes" rather
+// than falling back to anonymous access.
 func (tc *TC) GetArtifactContent(taskID string, runID int64, name string) (string, error) {
 	runIDStr := strconv.FormatInt(runID, 10)
 
-	if tc.IsAuthenticated() {
+	if tc.auth.Credentials.ClientID != "" {
 		signedURL, err := tc.queue.GetArtifact_SignedURL(taskID, runIDStr, name, 60*time.Second)
 		if err != nil {
 			return "", err
