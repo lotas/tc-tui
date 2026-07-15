@@ -14,13 +14,6 @@ import (
 	"github.com/taskcluster/tc-tui/taskcluster"
 )
 
-// maxArtifactContentLines caps how much of an artifact's content is
-// rendered — a worker log can run to hundreds of thousands of lines, and an
-// unbounded render both floods the screen and gets slow to scroll. Only the
-// tail is kept, since the interesting bit of a failing task's log is almost
-// always the end.
-const maxArtifactContentLines = 1000
-
 // maxArtifactRunFetchConcurrency bounds how many runs' artifact lists are
 // fetched at once — a task with many retries shouldn't fire off unbounded
 // concurrent requests.
@@ -220,13 +213,13 @@ func parseArtifactID(id string) (taskID string, runID int64, name string, err er
 // tcell's key-event loop (see shell.Shell's loadGeneration doc comment), so
 // a slow SetText call — its word-wrap/color-tag parsing cost scales with
 // input size — freezes the entire UI, including quitting, until it returns.
-// Sized to comfortably fit chroma's syntax-highlighted expansion of content
-// right at maxArtifactHighlightBytes (~4.4x for JSON, per that constant's
-// calibration) without truncating it; it's also a backstop independent of
-// maxArtifactContentLines, since even line-truncated text could be huge if
-// a handful of lines are each very long (e.g. a minified JSON blob on one
-// line).
-const maxArtifactRenderBytes = 512 * 1024 // 512 KiB
+// Measured at ~20ms/MiB for plain (unhighlighted) text, so this keeps
+// SetText itself under ~170ms worst case — a brief blip, not a freeze —
+// while comfortably fitting the vast majority of real logs in full (a
+// build/worker log rarely exceeds a few MiB). The tail is kept when this
+// does have to truncate, since the interesting bit of a failing task's log
+// is almost always the end.
+const maxArtifactRenderBytes = 8 * 1024 * 1024 // 8 MiB
 
 // renderArtifactBody renders one artifact's content for display: binary
 // content shows metadata instead of raw bytes (garbled and possibly slow to
@@ -254,7 +247,7 @@ func renderArtifactBody(contentType, content string, truncated bool) string {
 
 	capped := false
 	if len(body) > maxArtifactRenderBytes {
-		body = body[:maxArtifactRenderBytes]
+		body = body[len(body)-maxArtifactRenderBytes:]
 		capped = true
 	}
 
@@ -381,23 +374,16 @@ func escapeIgnoringANSI(s string) string {
 // color/region tag — including one sitting immediately after a real ANSI
 // color code (see that function's doc comment for why a plain tview.Escape
 // isn't safe there) — and tview.TranslateANSI then converts genuine ANSI
-// color codes (common in a live worker log) into real tview tags.
-// Content is tail-truncated to the last maxArtifactContentLines lines, since
-// the interesting bit of a failing task's log is almost always the end.
+// color codes (common in a live worker log) into real tview tags. The full
+// content is rendered — renderArtifactBody's own maxArtifactRenderBytes is
+// the only size cap, so a normal-sized log (even a few thousand lines)
+// displays in full rather than getting cut to an arbitrary line count.
 func renderArtifactText(content string) string {
 	body := tview.TranslateANSI(escapeIgnoringANSI(content))
 	if strings.TrimSpace(body) == "" {
 		return "(empty)"
 	}
-
-	lines := strings.Split(body, "\n")
-	if len(lines) <= maxArtifactContentLines {
-		return body
-	}
-
-	tail := lines[len(lines)-maxArtifactContentLines:]
-	return fmt.Sprintf("[yellow](showing last %d of %d lines)[white]\n\n%s",
-		maxArtifactContentLines, len(lines), strings.Join(tail, "\n"))
+	return body
 }
 
 // isBinaryArtifact reports whether content shouldn't be rendered as text. A

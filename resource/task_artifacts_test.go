@@ -108,8 +108,12 @@ func TestTaskArtifactsResourceDescribeRendersContent(t *testing.T) {
 	}
 }
 
-func TestTaskArtifactsResourceDescribeTruncatesLargeContent(t *testing.T) {
-	lines := make([]string, maxArtifactContentLines+10)
+// TestTaskArtifactsResourceDescribeShowsFullContentForOrdinaryLogSize
+// guards against re-introducing an arbitrary line-count cap: a normal-sized
+// log (a few thousand short lines, well under maxArtifactRenderBytes) must
+// render in full, not get cut to some fixed line count.
+func TestTaskArtifactsResourceDescribeShowsFullContentForOrdinaryLogSize(t *testing.T) {
+	lines := make([]string, 5000)
 	for i := range lines {
 		lines[i] = "log line"
 	}
@@ -120,11 +124,32 @@ func TestTaskArtifactsResourceDescribeTruncatesLargeContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(detail.Body, "showing last 1000 of 1010 lines") {
-		t.Fatalf("expected a truncation notice, got: %s", detail.Body[:200])
+	if strings.Contains(detail.Body, "showing only part") || strings.Contains(detail.Body, "showing last") {
+		t.Fatalf("expected no truncation notice for an ordinary-sized log, got: %s", detail.Body[:200])
 	}
-	if strings.Count(detail.Body, "log line") != maxArtifactContentLines {
-		t.Fatalf("expected exactly %d lines of content, got %d", maxArtifactContentLines, strings.Count(detail.Body, "log line"))
+	if strings.Count(detail.Body, "log line") != len(lines) {
+		t.Fatalf("expected all %d lines, got %d", len(lines), strings.Count(detail.Body, "log line"))
+	}
+}
+
+// TestTaskArtifactsResourceDescribeKeepsTailWhenOverRenderCap verifies the
+// byte-size safety net (maxArtifactRenderBytes) keeps the *tail* of oversized
+// content, not the head — the interesting bit of a failing task's log is
+// almost always the end.
+func TestTaskArtifactsResourceDescribeKeepsTailWhenOverRenderCap(t *testing.T) {
+	content := strings.Repeat("a", maxArtifactRenderBytes) + "TAIL-MARKER"
+	fake := &fakeTaskcluster{artifactContent: content}
+	res := NewTaskArtifactsResource(fake)
+
+	detail, err := res.Describe("task-1/0::public/logs/live_backing.log")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(detail.Body, "TAIL-MARKER") {
+		t.Fatalf("expected the tail to be preserved when content exceeds the render cap")
+	}
+	if !strings.Contains(detail.Body, "showing only part") {
+		t.Fatalf("expected a truncation banner, got: %s", detail.Body[:200])
 	}
 }
 
