@@ -15,10 +15,6 @@ type TcController interface {
 	// name/alias (and optional scope/id), the way `:name scope` in the
 	// command bar would — used for the CLI's positional arguments.
 	StartUIAt(name, scope string) error
-	// HelpText returns the same resource-derived help content shown by the
-	// in-app '?' overlay, formatted for a plain terminal — used by the
-	// CLI's --help.
-	HelpText() string
 }
 
 type Controller struct {
@@ -32,13 +28,17 @@ type Controller struct {
 	statePath string
 }
 
-func NewController() TcController {
-	tc := taskcluster.NewTaskcluster()
-
+// buildRegistry registers every resource against tc. tc may be nil for a
+// registry used only for its resource names/descriptions/columns (see
+// HelpText) — resources dereference their client in List/Describe only,
+// never at construction.
+func buildRegistry(tc taskcluster.Taskcluster) *resource.Registry {
 	registry := resource.NewRegistry()
 	registry.Register(resource.NewRolesResource(tc))
 	registry.Register(resource.NewClientsResource(tc))
 	registry.Register(resource.NewSecretsResource(tc))
+	registry.Register(resource.NewHooksResource(tc))
+	registry.Register(resource.NewHookFiresResource(tc))
 	registry.Register(resource.NewPurgeCacheResource(tc))
 	registry.Register(resource.NewTaskIndexResource(tc))
 	registry.Register(resource.NewWorkerPoolsResource(tc))
@@ -56,6 +56,22 @@ func NewController() TcController {
 	registry.Register(resource.NewPendingTasksResource(tc))
 	registry.Register(resource.NewClaimedTasksResource(tc))
 	registry.Register(resource.NewHistoryResource())
+	return registry
+}
+
+// HelpText returns the same resource-derived help content shown by the
+// in-app '?' overlay, formatted for a plain terminal — used by the CLI's
+// --help. It deliberately never constructs a Taskcluster client, so `tc-tui
+// --help` works without TASKCLUSTER_ROOT_URL set (a real client panics
+// without it).
+func HelpText() string {
+	return shell.PlainHelpText(buildRegistry(nil))
+}
+
+func NewController() TcController {
+	tc := taskcluster.NewTaskcluster()
+
+	registry := buildRegistry(tc)
 
 	sh := shell.New(registry)
 
@@ -78,10 +94,6 @@ func (c *Controller) StartUI() error {
 
 func (c *Controller) StartUIAt(name, scope string) error {
 	return c.run(func() error { return c.shell.StartAt(name, scope) })
-}
-
-func (c *Controller) HelpText() string {
-	return shell.PlainHelpText(c.registry)
 }
 
 // run wires up header info and persists navigation state around whichever

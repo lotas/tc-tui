@@ -153,7 +153,7 @@ type Faceted interface {
 	Resource
 	FacetColumn() int                 // index into Columns()/Row.Cells to filter on
 	FacetOptions(rows []Row) []string // ordered tab values (excluding "All"); resource
-	                                   // decides whether to hardcode or derive from rows
+	// decides whether to hardcode or derive from rows
 }
 
 // ServerFaceted is implemented by resources whose facet tabs must be
@@ -166,7 +166,7 @@ type Faceted interface {
 // volume makes that safe; WorkersResource does not.
 type ServerFaceted interface {
 	Resource
-	FacetOptions() []string                          // ordered; first is the default/initial tab
+	FacetOptions() []string                           // ordered; first is the default/initial tab
 	FacetList(scope, value string) ([]Row, error)     // fetches only rows matching this tab
 	FacetCounts(scope string) (map[string]int, error) // cheap aggregate counts per tab value; no row fetch
 }

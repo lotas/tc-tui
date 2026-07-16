@@ -59,7 +59,7 @@ type fakeFacetedHelpResource struct {
 	fakeResource
 }
 
-func (f fakeFacetedHelpResource) FacetColumn() int                         { return 0 }
+func (f fakeFacetedHelpResource) FacetColumn() int                          { return 0 }
 func (f fakeFacetedHelpResource) FacetOptions(rows []resource.Row) []string { return nil }
 
 type fakeServerFacetedHelpResource struct {

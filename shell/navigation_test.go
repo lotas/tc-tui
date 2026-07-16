@@ -470,7 +470,7 @@ type fakeAugmentableResource struct {
 	augmentedIDs []string
 }
 
-func (f *fakeAugmentableResource) List() ([]resource.Row, error) { return f.rows, nil }
+func (f *fakeAugmentableResource) List() ([]resource.Row, error)  { return f.rows, nil }
 func (f *fakeAugmentableResource) RefreshInterval() time.Duration { return f.ttl }
 
 func (f *fakeAugmentableResource) Augment(rows []resource.Row, wanted func(id string) bool, onUpdate func(rows []resource.Row, completed, total int)) {
@@ -2000,7 +2000,9 @@ type fakeScopeActionsResource struct {
 	actions []resource.DetailAction
 }
 
-func (f fakeScopeActionsResource) ScopeActions(scope string) []resource.DetailAction { return f.actions }
+func (f fakeScopeActionsResource) ScopeActions(scope string) []resource.DetailAction {
+	return f.actions
+}
 
 func TestRenderListPopulatesDetailActionsFromScopeActions(t *testing.T) {
 	s := New(resource.NewRegistry())

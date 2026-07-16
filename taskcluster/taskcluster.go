@@ -16,6 +16,7 @@ import (
 	tcurls "github.com/taskcluster/taskcluster-lib-urls"
 	tcclient "github.com/taskcluster/taskcluster/v101/clients/client-go"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tchooks"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcindex"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcpurgecache"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
@@ -45,6 +46,8 @@ type ClientList []tcauth.GetClientResponse                        // ListClients
 type PurgeCacheRequestList []tcpurgecache.PurgeCacheRequestsEntry // PurgeRequests' members
 type IndexNamespaceList []tcindex.Namespace                       // ListNamespaces' members
 type IndexTaskList []tcindex.Task                                 // ListTasks' members
+type HookList []tchooks.HookDefinition                            // ListHooks' members, across all hook groups
+type HookLastFireList []tchooks.Var                               // ListLastFires' members
 
 type Taskcluster interface {
 	GetVersion() Version
@@ -87,6 +90,10 @@ type Taskcluster interface {
 
 	GetPurgeCacheRequestsForPool(workerPoolID string) (PurgeCacheRequestList, error)
 
+	GetHooks() (HookList, error)
+	GetHook(hookGroupID, hookID string) (*tchooks.HookDefinition, error)
+	GetHookLastFires(hookGroupID, hookID string) (HookLastFireList, error)
+
 	GetIndexNamespaces(namespace string) (IndexNamespaceList, error)
 	GetIndexTasks(namespace string) (IndexTaskList, error)
 	FindIndexedTask(indexPath string) (*tcindex.IndexedTaskResponse, error)
@@ -99,6 +106,7 @@ type TC struct {
 	secrets    *tcsecrets.Secrets
 	purgeCache *tcpurgecache.PurgeCache
 	index      *tcindex.Index
+	hooks      *tchooks.Hooks
 
 	tcRoot string
 }
@@ -118,6 +126,7 @@ func NewTaskcluster() Taskcluster {
 		secrets:    tcsecrets.NewFromEnv(),
 		purgeCache: tcpurgecache.NewFromEnv(),
 		index:      tcindex.NewFromEnv(),
+		hooks:      tchooks.NewFromEnv(),
 	}
 
 	tc.tcRoot = tc.auth.RootURL
@@ -681,6 +690,56 @@ func (tc *TC) GetPurgeCacheRequestsForPool(workerPoolID string) (PurgeCacheReque
 	}
 
 	return PurgeCacheRequestList(resp.Requests), nil
+}
+
+// GetHooks lists every hook in the deployment, across all hook groups —
+// there is no single list-everything endpoint, so this walks listHookGroups
+// and then listHooks per group, matching how the web UI's own hooks page
+// assembles its view. Neither endpoint paginates.
+func (tc *TC) GetHooks() (HookList, error) {
+	groups, err := tc.hooks.ListHookGroups()
+	if err != nil {
+		return nil, err
+	}
+
+	var all HookList
+	for _, group := range groups.Groups {
+		resp, err := tc.hooks.ListHooks(group)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, resp.Hooks...)
+	}
+
+	return all, nil
+}
+
+func (tc *TC) GetHook(hookGroupID, hookID string) (*tchooks.HookDefinition, error) {
+	return tc.hooks.Hook(hookGroupID, hookID)
+}
+
+// GetHookLastFires lists the most recent attempts to fire a hook (each with
+// the task it created, or the error that prevented one). A hook that has
+// never fired makes listLastFires respond 404 ("No such hook or never
+// fired") rather than an empty list — reported here as an empty list, since
+// the hook itself is known to exist (callers fetch it first) and "never
+// fired" is an ordinary state, not a failure.
+func (tc *TC) GetHookLastFires(hookGroupID, hookID string) (HookLastFireList, error) {
+	fires, err := paginate(func(cont string) ([]tchooks.Var, string, error) {
+		resp, err := tc.hooks.ListLastFires(hookGroupID, hookID, cont, PageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.LastFires, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		if isNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return HookLastFireList(fires), nil
 }
 
 func (tc *TC) GetIndexNamespaces(namespace string) (IndexNamespaceList, error) {

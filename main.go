@@ -15,12 +15,14 @@ func main() {
 		return
 	}
 
-	ctrl := controller.NewController()
-
+	// Help is printed before any controller (and thus Taskcluster client)
+	// exists, so it works without TASKCLUSTER_ROOT_URL set.
 	if showHelp {
-		printUsage(ctrl.HelpText())
+		printUsage(controller.HelpText())
 		return
 	}
+
+	ctrl := controller.NewController()
 
 	var err error
 	if name != "" {

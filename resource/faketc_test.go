@@ -4,6 +4,7 @@ import (
 	"regexp"
 
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tchooks"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcindex"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcsecrets"
@@ -124,6 +125,13 @@ type fakeTaskcluster struct {
 
 	purgeCacheRequestsForPool    taskcluster.PurgeCacheRequestList
 	purgeCacheRequestsForPoolErr error
+
+	hooks            taskcluster.HookList
+	hooksErr         error
+	hook             *tchooks.HookDefinition
+	hookErr          error
+	hookLastFires    taskcluster.HookLastFireList
+	hookLastFiresErr error
 
 	indexNamespaces    taskcluster.IndexNamespaceList
 	indexNamespacesErr error
@@ -271,6 +279,18 @@ func (f *fakeTaskcluster) GetSecret(name string) (*tcsecrets.Secret, error) {
 
 func (f *fakeTaskcluster) GetPurgeCacheRequestsForPool(workerPoolID string) (taskcluster.PurgeCacheRequestList, error) {
 	return f.purgeCacheRequestsForPool, f.purgeCacheRequestsForPoolErr
+}
+
+func (f *fakeTaskcluster) GetHooks() (taskcluster.HookList, error) {
+	return f.hooks, f.hooksErr
+}
+
+func (f *fakeTaskcluster) GetHook(hookGroupID, hookID string) (*tchooks.HookDefinition, error) {
+	return f.hook, f.hookErr
+}
+
+func (f *fakeTaskcluster) GetHookLastFires(hookGroupID, hookID string) (taskcluster.HookLastFireList, error) {
+	return f.hookLastFires, f.hookLastFiresErr
 }
 
 func (f *fakeTaskcluster) GetIndexNamespaces(namespace string) (taskcluster.IndexNamespaceList, error) {

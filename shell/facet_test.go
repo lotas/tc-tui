@@ -12,14 +12,16 @@ type fakeFacetedColumn struct {
 	options []string
 }
 
-func (f fakeFacetedColumn) Name() string                            { return "test" }
-func (f fakeFacetedColumn) Aliases() []string                       { return nil }
-func (f fakeFacetedColumn) Description() string                     { return "" }
-func (f fakeFacetedColumn) Columns() []resource.Column              { return nil }
-func (f fakeFacetedColumn) List() ([]resource.Row, error)           { return nil, nil }
-func (f fakeFacetedColumn) Describe(id string) (resource.Detail, error) { return resource.Detail{}, nil }
-func (f fakeFacetedColumn) RefreshInterval() time.Duration          { return 0 }
-func (f fakeFacetedColumn) FacetColumn() int                         { return f.column }
+func (f fakeFacetedColumn) Name() string                  { return "test" }
+func (f fakeFacetedColumn) Aliases() []string             { return nil }
+func (f fakeFacetedColumn) Description() string           { return "" }
+func (f fakeFacetedColumn) Columns() []resource.Column    { return nil }
+func (f fakeFacetedColumn) List() ([]resource.Row, error) { return nil, nil }
+func (f fakeFacetedColumn) Describe(id string) (resource.Detail, error) {
+	return resource.Detail{}, nil
+}
+func (f fakeFacetedColumn) RefreshInterval() time.Duration            { return 0 }
+func (f fakeFacetedColumn) FacetColumn() int                          { return f.column }
 func (f fakeFacetedColumn) FacetOptions(rows []resource.Row) []string { return f.options }
 
 func TestFilterByFacetNilFacetedReturnsUnchanged(t *testing.T) {
@@ -109,14 +111,16 @@ type fakeServerFaceted struct {
 	options []string
 }
 
-func (f fakeServerFaceted) Name() string                            { return "test" }
-func (f fakeServerFaceted) Aliases() []string                       { return nil }
-func (f fakeServerFaceted) Description() string                     { return "" }
-func (f fakeServerFaceted) Columns() []resource.Column              { return nil }
-func (f fakeServerFaceted) List() ([]resource.Row, error)           { return nil, nil }
-func (f fakeServerFaceted) Describe(id string) (resource.Detail, error) { return resource.Detail{}, nil }
-func (f fakeServerFaceted) RefreshInterval() time.Duration          { return 0 }
-func (f fakeServerFaceted) FacetOptions() []string { return f.options }
+func (f fakeServerFaceted) Name() string                  { return "test" }
+func (f fakeServerFaceted) Aliases() []string             { return nil }
+func (f fakeServerFaceted) Description() string           { return "" }
+func (f fakeServerFaceted) Columns() []resource.Column    { return nil }
+func (f fakeServerFaceted) List() ([]resource.Row, error) { return nil, nil }
+func (f fakeServerFaceted) Describe(id string) (resource.Detail, error) {
+	return resource.Detail{}, nil
+}
+func (f fakeServerFaceted) RefreshInterval() time.Duration { return 0 }
+func (f fakeServerFaceted) FacetOptions() []string         { return f.options }
 func (f fakeServerFaceted) FacetList(scope, value string) ([]resource.Row, error) {
 	return nil, nil
 }
