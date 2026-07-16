@@ -64,17 +64,26 @@ func TestWorkerPoolsResourceListShowsLoadingPlaceholdersForSlowColumns(t *testin
 	}
 }
 
+// alwaysWanted is the wanted callback for tests that don't exercise
+// Augment's skip-unwanted-rows behavior — every row is fetched
+// unconditionally, matching Augment's old (pre-wanted) behavior.
+func alwaysWanted(id string) bool { return true }
+
 // collectAugmentUpdates runs Augment to completion (it blocks until done)
 // and returns every onUpdate call it made, in the order received. Augment
 // runs its two enrichment paths concurrently, so only the LAST call's
 // snapshot (the fully-merged state) and the total call count are safe to
 // assert on — never intermediate ordering between the two paths.
 func collectAugmentUpdates(res *WorkerPoolsResource, rows []Row) [][]Row {
+	return collectAugmentUpdatesWithWanted(res, rows, alwaysWanted)
+}
+
+func collectAugmentUpdatesWithWanted(res *WorkerPoolsResource, rows []Row, wanted func(id string) bool) [][]Row {
 	var (
 		mu      sync.Mutex
 		updates [][]Row
 	)
-	res.Augment(rows, func(updated []Row, completed, total int) {
+	res.Augment(rows, wanted, func(updated []Row, completed, total int) {
 		mu.Lock()
 		updates = append(updates, updated)
 		mu.Unlock()
@@ -128,6 +137,46 @@ func TestWorkerPoolsResourceAugmentLeavesColumnsBlankWhenNothingObtained(t *test
 		if strings.TrimSpace(last.Cells[i]) != "" {
 			t.Fatalf("expected cell %d blank when nothing was obtained, got %q", i, last.Cells[i])
 		}
+	}
+}
+
+// A row wanted rejects must not get real data written in for its
+// Pending/Claimed/Errors columns — it should be left exactly as it came in,
+// since the point of wanted is to skip spending API calls (and progress) on
+// rows that are no longer visible (e.g. a filter narrowed after a big
+// unfiltered batch was already dispatched).
+func TestWorkerPoolsResourceAugmentSkipsRowsWantedRejects(t *testing.T) {
+	fake := &fakeTaskcluster{
+		taskQueueCounts: map[string]taskcluster.TaskQueueCounts{
+			"proj/pool-a": {Pending: 7, PendingKnown: true, Claimed: 3, ClaimedKnown: true},
+			"proj/pool-b": {Pending: 9, PendingKnown: true, Claimed: 1, ClaimedKnown: true},
+		},
+		workerPoolErrorCounts: map[string]int{"proj/pool-a": 2, "proj/pool-b": 5},
+	}
+	res := NewWorkerPoolsResource(fake)
+	rows := []Row{
+		{ID: "proj/pool-a", Cells: []string{"proj/pool-a", "gcp", "0", "0", loadingPlaceholder, loadingPlaceholder, loadingPlaceholder}},
+		{ID: "proj/pool-b", Cells: []string{"proj/pool-b", "gcp", "0", "0", loadingPlaceholder, loadingPlaceholder, loadingPlaceholder}},
+	}
+
+	wanted := func(id string) bool { return id == "proj/pool-a" } // pool-b is no longer visible
+	updates := collectAugmentUpdatesWithWanted(res, rows, wanted)
+
+	last := updates[len(updates)-1]
+	var a, b Row
+	for _, row := range last {
+		switch row.ID {
+		case "proj/pool-a":
+			a = row
+		case "proj/pool-b":
+			b = row
+		}
+	}
+	if strings.TrimSpace(a.Cells[4]) != "7" || strings.TrimSpace(a.Cells[5]) != "3" || strings.TrimSpace(a.Cells[6]) != "2" {
+		t.Fatalf("expected wanted pool-a to be fully augmented, got %+v", a.Cells)
+	}
+	if b.Cells[4] != loadingPlaceholder || b.Cells[5] != loadingPlaceholder || b.Cells[6] != loadingPlaceholder {
+		t.Fatalf("expected unwanted pool-b to be left untouched, got %+v", b.Cells)
 	}
 }
 

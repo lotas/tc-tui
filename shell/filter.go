@@ -34,3 +34,26 @@ func rowMatches(row resource.Row, lowerQuery string) bool {
 
 	return false
 }
+
+// mergeRowsByID returns a copy of base with each row whose ID also appears
+// in updates replaced by that updated row, preserving base's order and
+// length. Used to fold an Augment result computed over only a filtered
+// subset of rows back into the full row set, leaving filtered-out rows
+// (absent from updates) untouched rather than discarding them.
+func mergeRowsByID(base, updates []resource.Row) []resource.Row {
+	byID := make(map[string]resource.Row, len(updates))
+	for _, u := range updates {
+		byID[u.ID] = u
+	}
+
+	merged := make([]resource.Row, len(base))
+	for i, row := range base {
+		if u, ok := byID[row.ID]; ok {
+			merged[i] = u
+		} else {
+			merged[i] = row
+		}
+	}
+
+	return merged
+}

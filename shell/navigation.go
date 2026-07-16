@@ -3,6 +3,7 @@ package shell
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/taskcluster/tc-tui/resource"
@@ -321,6 +322,7 @@ func (s *Shell) refreshTable() {
 		title += " [no truncation]"
 	}
 	s.setTitle(title)
+	s.updateBorderColor()
 
 	rows := FilterRows(s.lastRows, s.filterQuery)
 	s.renderTabsBar(rows)
@@ -331,6 +333,12 @@ func (s *Shell) refreshTable() {
 	if s.currentFaceted != nil {
 		rows = FilterByFacet(rows, s.currentFaceted, s.currentFacetValue)
 	}
+
+	// rows is now exactly what's about to be shown (pre-sort — sorting
+	// doesn't change WHICH rows are visible, only their order), so this is
+	// the one place that both drives augmentation and publishes the live
+	// visible-set snapshot Augment's wanted callback reads.
+	s.triggerAugmentForNewlyVisibleRows(rows)
 
 	rows = SortRows(rows, s.currentSort)
 	s.table.SetData(s.currentColumns, rows, s.currentSort)
@@ -398,6 +406,19 @@ func (s *Shell) renderList(res resource.Resource, scope string, isRestore bool) 
 	s.currentListResource = res.Name()
 	s.currentListScope = scope
 	s.currentScopeSubtitle = "" // repopulated by loadList if res implements ScopeSubtitle
+
+	// s.lastRows belongs to whichever resource/view was on screen before —
+	// it may have a completely different shape (fewer cells) than the one
+	// about to load. Cleared here, synchronously, rather than left to
+	// linger until the fetch resolves: any refreshTable trigger in that
+	// window (a sort/filter/facet keypress fired before the new rows
+	// arrive) would otherwise hand these stale rows to the NEW resource's
+	// Augment — e.g. WorkerPoolsResource.Augment unconditionally indexes
+	// Cells[4..6], which panics on a row with fewer columns than that.
+	s.lastRows = nil
+	s.augmentedRowIDs = map[string]bool{}
+	s.settledRowIDs = map[string]bool{}
+	s.visibleRowIDs.Store(map[string]bool{})
 	s.currentColumns = res.Columns()
 	s.currentSort = s.sortByResource[res.Name()] // zero value (SortNone) if not yet sorted
 
@@ -420,6 +441,7 @@ func (s *Shell) renderList(res resource.Resource, scope string, isRestore bool) 
 	s.table.SetData(s.currentColumns, nil, s.currentSort)
 	s.renderTabsBar(nil)
 	s.content.SwitchToPage(pageTable)
+	s.updateBorderColor()
 	s.app.SetFocus(s.table)
 
 	s.startRefreshLoop(View{ResourceName: res.Name(), Kind: ListKind, Scope: scope}, res.RefreshInterval())
@@ -448,11 +470,24 @@ func (s *Shell) restoreFacetValue(sf resource.ServerFaceted, name string) string
 // shared by loadList's synchronous cache-hit path and its async fetch-success
 // path. subtitle is whatever a ScopeSubtitle resource returned alongside
 // rows ("" if the resource doesn't implement it, or the scope is empty).
-func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, counts map[string]int, subtitle string) {
+// settledIDs seeds both s.augmentedRowIDs and s.settledRowIDs — nil for a
+// fresh fetch (nothing augmented yet), or a cache hit's
+// cacheEntry.settledIDs, so the refreshTable call below only re-triggers
+// Augment for whatever that cached snapshot hadn't actually finished yet,
+// rather than either blindly re-requesting rows already done or wrongly
+// treating still-unaugmented ones (e.g. hidden by a filter, or simply
+// still in flight, at the time they were cached) as settled forever.
+func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, counts map[string]int, subtitle string, settledIDs map[string]bool) {
 	s.lastRows = rows
 	s.currentScopeSubtitle = subtitle
 	s.augmentCompleted, s.augmentTotal = 0, 0
 	s.augmentEpoch++
+	s.augmentedRowIDs = map[string]bool{}
+	s.settledRowIDs = map[string]bool{}
+	for id := range settledIDs {
+		s.augmentedRowIDs[id] = true
+		s.settledRowIDs[id] = true
+	}
 	if counts != nil {
 		s.currentFacetCounts = counts
 	}
@@ -515,7 +550,12 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 
 	if !forceRefresh {
 		if entry, ok := s.cache.get(key, res.RefreshInterval()); ok {
-			s.applyListResult(res, entry.rows, entry.counts, entry.subtitle)
+			// entry.settledIDs restores exactly which rows this cached
+			// snapshot had actually FINISHED augmenting — anything else
+			// (e.g. hidden by a narrower filter at cache time, or simply
+			// still in flight when it was cached) still gets picked up
+			// fresh below, via refreshTable.
+			s.applyListResult(res, entry.rows, entry.counts, entry.subtitle, entry.settledIDs)
 			recordVisit() // <-- new
 			return
 		}
@@ -525,7 +565,6 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 		var rows []resource.Row
 		var counts map[string]int
 		var err error
-		var epoch int
 		var subtitle string
 
 		if sf, ok := res.(resource.ServerFaceted); ok {
@@ -582,31 +621,290 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 			}
 
 			s.cache.set(key, cacheEntry{rows: rows, counts: counts, subtitle: subtitle, fetchedAt: time.Now()})
-			s.applyListResult(res, rows, counts, subtitle) // bumps s.augmentEpoch
-			epoch = s.augmentEpoch
+			s.applyListResult(res, rows, counts, subtitle, nil) // bumps s.augmentEpoch, resets s.augmentedRowIDs
 			recordVisit() // <-- new
+			// refreshTable (called by applyListResult) already triggers
+			// Augment for whatever's visible now — see
+			// triggerAugmentForNewlyVisibleRows.
 		})
-
-		if err == nil {
-			if a, ok := res.(resource.Augmentable); ok {
-				view := View{ResourceName: res.Name(), Kind: ListKind, Scope: scope}
-				a.Augment(rows, func(updated []resource.Row, completed, total int) {
-					s.app.QueueUpdateDraw(func() {
-						if s.isStaleLoad(gen) || !s.isTopView(view) || facetValue != s.currentFacetValue {
-							return // the same staleness checks the base-rows success branch above uses
-						}
-						if s.augmentEpoch != epoch {
-							return // a newer base-row render for this view has since started — drop this now-stale tick rather than clobbering fresher rows
-						}
-						s.lastRows = updated
-						s.augmentCompleted, s.augmentTotal = completed, total
-						s.refreshTable()
-						s.cache.set(key, cacheEntry{rows: updated, counts: counts, subtitle: subtitle, fetchedAt: time.Now()})
-					})
-				})
-			}
-		}
 	}()
+}
+
+// markRowsAugmented records rows as already requested for the current
+// augmentEpoch, so triggerAugmentForNewlyVisibleRows won't hand them to
+// Augment a second time.
+func (s *Shell) markRowsAugmented(rows []resource.Row) {
+	for _, row := range rows {
+		s.augmentedRowIDs[row.ID] = true
+	}
+}
+
+// cloneIDSet copies an id set (s.settledRowIDs, when storing alongside a
+// cache entry) — the cache must hold its own snapshot, not a reference to
+// the live map, since the latter is reset wholesale (to a new map) by the
+// very next applyListResult call.
+func cloneIDSet(ids map[string]bool) map[string]bool {
+	clone := make(map[string]bool, len(ids))
+	for id := range ids {
+		clone[id] = true
+	}
+	return clone
+}
+
+// rowIDSet builds a plain lookup set from rows' IDs — used both for the
+// live visibleRowIDs snapshot and wherever else a row-membership check by ID
+// is all that's needed.
+func rowIDSet(rows []resource.Row) map[string]bool {
+	set := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		set[row.ID] = true
+	}
+	return set
+}
+
+// triggerAugmentForNewlyVisibleRows publishes visible (exactly what
+// refreshTable is about to render — post filter AND facet) as the new
+// s.visibleRowIDs snapshot, then kicks off an Augmentable.Augment call for
+// whichever of those rows haven't already been augmented (or requested)
+// this augmentEpoch. Called from refreshTable, so it re-fires whenever the
+// filter or facet changes, in particular when widening or clearing a filter
+// reveals rows that were skipped by an earlier, narrower call. Rows still
+// hidden are left alone, same as before — this only ever adds work for rows
+// that just became visible, never repeats it for ones already covered.
+//
+// Publishing the snapshot unconditionally (even when there's nothing NEW to
+// request) matters just as much as the augmenting itself: an
+// Augmentable.Augment call already in flight from an EARLIER, wider visible
+// set (e.g. Augment was requested for all 400 rows of an unfiltered list)
+// reads this same snapshot via its wanted callback, so narrowing the filter
+// while that batch is still draining tells it to stop spending further API
+// calls on rows that are no longer visible — see Augmentable.Augment's doc.
+func (s *Shell) triggerAugmentForNewlyVisibleRows(visible []resource.Row) {
+	visibleSet := rowIDSet(visible)
+
+	res, ok := s.registry.Resolve(s.currentListResource)
+	if !ok {
+		s.visibleRowIDs.Store(visibleSet)
+		return
+	}
+	a, ok := res.(resource.Augmentable)
+	if !ok {
+		s.visibleRowIDs.Store(visibleSet)
+		return
+	}
+
+	var toAugment []resource.Row
+	for _, row := range visible {
+		if !s.augmentedRowIDs[row.ID] {
+			toAugment = append(toAugment, row)
+		}
+	}
+
+	// The filter matches only against each row's CURRENT cells, so a query
+	// aimed at an augmented column (e.g. worker pools' Pending/Claimed/
+	// Errors) can't match a row still sitting on its loading placeholder.
+	// Two ways that bites:
+	//   - Every row in the base list is still on its placeholder, visible
+	//     comes back empty, and nothing above gets requested — a filter
+	//     restored from a prior session never even gets a keystroke to
+	//     retry it, so it would find nothing, forever, with no way out.
+	//   - SOME rows already matched via an ordinary (known) column, so
+	//     visible is non-empty and augmentation looks "done" for this
+	//     query — but another row that would ALSO match, only via an
+	//     augmented column, never gets checked and silently never shows up.
+	//     A non-empty visible set on its own says nothing about whether
+	//     every possible match has been found.
+	// Fall back to augmenting a small bounded batch from the full
+	// (unfiltered) list whenever EITHER can be happening, so filtering
+	// keeps making forward progress toward a complete result instead of
+	// settling for whatever's already been found. Gated on
+	// len(toAugment) never being used alone — that's also 0, and common,
+	// whenever a non-empty visible set has simply already been fully
+	// augmented, which must NOT re-trigger this fallback on its own.
+	//
+	// Gated on mightMatchAugmentedColumn ALONE, deliberately not "OR
+	// len(visible) == 0": base columns (pool ID, provider, capacity) are
+	// ALL already fully known from the very first render, never a
+	// placeholder — so a purely-alphabetic query matching zero rows is a
+	// definitive, complete answer already; augmenting more rows cannot
+	// possibly turn up a NEW match for it, since alphabetic text can never
+	// match a numeric augmented column either. Falling back anyway for
+	// that case (an earlier version of this fix did, via a bare
+	// len(visible) == 0 check) would walk the ENTIRE hidden list for a
+	// plain typo, achieving nothing but the exact wasted-call cost wanted
+	// exists to avoid. mightMatchAugmentedColumn checks for a digit, since
+	// every augmented column across today's Augmentable resources renders
+	// as a plain decimal integer (worker pools' Pending/Claimed/Errors) —
+	// a digit-bearing query gets the benefit of the doubt and keeps
+	// probing in small batches (regardless of whether visible is currently
+	// empty or not) until nothing's left un-augmented, since it might
+	// legitimately be aimed at one of those columns rather than a name
+	// that happens to contain a digit. No separate emptiness check for
+	// s.filterQuery is needed: mightMatchAugmentedColumn("") is false, so
+	// an unfiltered view (where visible == s.lastRows already, leaving
+	// nothing extra for the fallback to add anyway) never reaches here.
+	if mightMatchAugmentedColumn(s.filterQuery) {
+		// staged tracks rows already added to toAugment by the visible
+		// loop above — s.augmentedRowIDs alone isn't enough, since
+		// markRowsAugmented hasn't run yet at this point in the function;
+		// without this, any row that's both currently visible AND still
+		// unaugmented (the common case right after a fresh load) would be
+		// iterated again here and added to toAugment a second time.
+		staged := make(map[string]bool, len(toAugment))
+		for _, row := range toAugment {
+			staged[row.ID] = true
+		}
+		for _, row := range s.lastRows {
+			if len(toAugment) >= augmentFilterMissFallbackBatch {
+				break
+			}
+			if s.augmentedRowIDs[row.ID] || staged[row.ID] {
+				continue
+			}
+			toAugment = append(toAugment, row)
+			staged[row.ID] = true
+			visibleSet[row.ID] = true // else wanted() would reject its own fallback batch immediately
+		}
+	}
+
+	s.visibleRowIDs.Store(visibleSet)
+
+	if len(toAugment) == 0 {
+		return
+	}
+	s.markRowsAugmented(toAugment)
+
+	view := View{ResourceName: s.currentListResource, Kind: ListKind, Scope: s.currentListScope}
+	gen := s.loadGeneration
+	epoch := s.augmentEpoch
+	facetValue := s.currentFacetValue
+	counts := s.currentFacetCounts
+	subtitle := s.currentScopeSubtitle
+	key := cacheKeyFor(res, s.currentListScope, facetValue)
+
+	// rejected records every id wanted has EVER said no to during this
+	// batch — not just its answer at the final tick. wanted may be called
+	// concurrently (Augmentable.Augment's own per-row goroutines), so it's
+	// guarded by rejectedMu; both are read/written only here and in the
+	// final-tick handling below, never elsewhere.
+	var (
+		rejectedMu sync.Mutex
+		rejected   = map[string]bool{}
+	)
+	wanted := func(id string) bool {
+		ids, _ := s.visibleRowIDs.Load().(map[string]bool)
+		if ids[id] {
+			return true
+		}
+		rejectedMu.Lock()
+		rejected[id] = true
+		rejectedMu.Unlock()
+		return false
+	}
+
+	go func() {
+		// lastRedraw throttles the expensive part of each tick (refreshTable
+		// — full filter/facet/sort recompute plus a whole-table SetData —
+		// and the cache write) to at most once per augmentRedrawInterval.
+		// With hundreds of rows, Augment can tick once per row; a resource
+		// that resolves most of those near-instantly (e.g. skipping ones
+		// wanted rejects, with no network round-trip to pace them) would
+		// otherwise fire that full redraw hundreds of times in a tight
+		// burst, starving the UI thread — including the very keystroke that
+		// just narrowed the filter. The cheap part (merging data into
+		// s.lastRows and the completed/total counters) still happens on
+		// every tick, so no data is ever lost — only how often it's actually
+		// drawn is throttled. The final tick (completed >= total) always
+		// redraws regardless, so the view never ends up stale.
+		var lastRedraw time.Time
+
+		a.Augment(toAugment, wanted, func(updated []resource.Row, completed, total int) {
+			s.app.QueueUpdateDraw(func() {
+				if s.isStaleLoad(gen) || !s.isTopView(view) || facetValue != s.currentFacetValue {
+					return // the same staleness checks loadList's fetch-success handler uses
+				}
+				if s.augmentEpoch != epoch {
+					return // a newer base-row render for this view has since started — drop this now-stale tick rather than clobbering fresher rows
+				}
+				merged := mergeRowsByID(s.lastRows, updated)
+				s.lastRows = merged
+				s.augmentCompleted, s.augmentTotal = completed, total
+
+				// Once this batch is done — and only then, since a row's
+				// wanted answer(s) can't be trusted as final until its
+				// whole batch has finished — settle its rows: un-mark
+				// every one wanted EVER rejected during it (not just
+				// whichever ones are still invisible right now — a row can
+				// be rejected while the filter is narrow and become
+				// visible again before the batch finishes; re-checking
+				// wanted() only at this final tick would see it as visible
+				// and leave it marked "augmented" despite never actually
+				// being fetched, so a later filter change would never
+				// retry it either), and mark every row that WASN'T
+				// rejected as settled — this is what makes it safe to
+				// cache: s.settledRowIDs, unlike s.augmentedRowIDs, only
+				// ever contains rows a batch has actually finished with.
+				if completed >= total {
+					rejectedMu.Lock()
+					for _, row := range toAugment {
+						if rejected[row.ID] {
+							delete(s.augmentedRowIDs, row.ID)
+						} else {
+							s.settledRowIDs[row.ID] = true
+						}
+					}
+					rejectedMu.Unlock()
+				}
+
+				now := time.Now()
+				if !shouldRedrawAugmentTick(completed, total, lastRedraw, now) {
+					return
+				}
+				lastRedraw = now
+				if s.onAugmentRedrawForTest != nil {
+					s.onAugmentRedrawForTest()
+				}
+				s.refreshTable() // may itself mark further rows augmented — snapshot afterward
+				s.cache.set(key, cacheEntry{
+					rows: merged, counts: counts, subtitle: subtitle, fetchedAt: time.Now(),
+					// s.settledRowIDs, not s.augmentedRowIDs: refreshTable
+					// just above may have dispatched a brand new batch
+					// (newly-visible rows, or the augmented-column-filter
+					// fallback) whose rows are now marked requested but
+					// have had zero chance to actually fetch anything yet
+					// — caching THAT set would let them be wrongly treated
+					// as settled if the user navigates away and back
+					// before that new batch's own final tick ever lands.
+					settledIDs: cloneIDSet(s.settledRowIDs),
+				})
+			})
+		})
+	}()
+}
+
+// augmentRedrawInterval caps how often a single Augment call's ticks
+// actually trigger a redraw — see triggerAugmentForNewlyVisibleRows.
+const augmentRedrawInterval = 150 * time.Millisecond
+
+// augmentFilterMissFallbackBatch caps how many additional, currently-hidden
+// rows triggerAugmentForNewlyVisibleRows will augment in one go when the
+// active filter matches nothing yet — see its doc comment.
+const augmentFilterMissFallbackBatch = 25
+
+// mightMatchAugmentedColumn reports whether query could plausibly match one
+// of today's Augmentable resources' augmented columns — see
+// triggerAugmentForNewlyVisibleRows's doc comment for why this exists and
+// its limits.
+func mightMatchAugmentedColumn(query string) bool {
+	return strings.ContainsAny(query, "0123456789")
+}
+
+// shouldRedrawAugmentTick decides whether an Augment tick should trigger the
+// expensive refreshTable+cache-write path right now: always once the batch
+// is done (completed >= total, so the view never ends up stale), otherwise
+// only if augmentRedrawInterval has elapsed since lastRedraw.
+func shouldRedrawAugmentTick(completed, total int, lastRedraw, now time.Time) bool {
+	return completed >= total || now.Sub(lastRedraw) >= augmentRedrawInterval
 }
 
 func (s *Shell) renderDetail(res resource.Resource, id string, isRestore bool) {
@@ -618,6 +916,7 @@ func (s *Shell) renderDetail(res resource.Resource, id string, isRestore bool) {
 	s.setTitle("Loading " + res.Name() + "...")
 	s.detail.SetData(resource.Detail{})
 	s.content.SwitchToPage(pageDetail)
+	s.updateBorderColor()
 	s.app.SetFocus(s.detail)
 
 	s.startRefreshLoop(View{ResourceName: res.Name(), Kind: DetailKind, SelectedID: id}, res.RefreshInterval())
@@ -689,6 +988,7 @@ func (s *Shell) showError(title string, err error, retry func()) {
 
 	s.setTitle(fmt.Sprintf("Error :: %s", title))
 	s.content.SwitchToPage(pageError)
+	s.updateBorderColor()
 	s.app.SetFocus(s.errorView)
 }
 

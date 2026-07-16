@@ -189,7 +189,17 @@ type Augmentable interface {
 	// plus a completed/total count. onUpdate may be called from any
 	// goroutine — the shell handles its own synchronization with the UI
 	// thread. Augment blocks until no more updates will come.
-	Augment(rows []Row, onUpdate func(rows []Row, completed, total int))
+	//
+	// wanted may be called concurrently, from any goroutine, at any point
+	// during the call — an implementation with its own per-row concurrency
+	// (e.g. one goroutine per row, rate-limited) should recheck it just
+	// before spending an API call on a given row, not only once up front,
+	// so a row that stops being wanted partway through a large batch (the
+	// caller applied a narrower filter while the batch was still draining)
+	// stops costing further work. A row Augment skips because of wanted
+	// still counts toward completed/total — it must not be silently
+	// dropped from the tally.
+	Augment(rows []Row, wanted func(id string) bool, onUpdate func(rows []Row, completed, total int))
 }
 
 // WebLinkable is implemented by resources that have a corresponding page in

@@ -147,10 +147,15 @@ func (f *fakeTaskcluster) GetWorkerPool(workerPoolID string) (*tcworkermanager.W
 }
 
 // GetTaskQueueCounts calls onEach once per ID, in order, with whatever
-// f.taskQueueCounts holds for that ID (the zero value if absent) — no
-// goroutines, so tests calling it don't need to synchronize.
-func (f *fakeTaskcluster) GetTaskQueueCounts(workerPoolIDs []string, onEach func(workerPoolID string, counts taskcluster.TaskQueueCounts)) {
+// f.taskQueueCounts holds for that ID (the zero value if absent or if
+// wanted rejects it) — no goroutines, so tests calling it don't need to
+// synchronize.
+func (f *fakeTaskcluster) GetTaskQueueCounts(workerPoolIDs []string, wanted func(workerPoolID string) bool, onEach func(workerPoolID string, counts taskcluster.TaskQueueCounts)) {
 	for _, id := range workerPoolIDs {
+		if !wanted(id) {
+			onEach(id, taskcluster.TaskQueueCounts{})
+			continue
+		}
 		onEach(id, f.taskQueueCounts[id])
 	}
 }

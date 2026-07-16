@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -100,6 +101,47 @@ type Shell struct {
 	// overwrite a newer reload's fresh (placeholder) rows with stale
 	// computed values.
 	augmentEpoch int
+
+	// augmentedRowIDs tracks which of the current view's rows have already
+	// been REQUESTED from Augmentable.Augment (dispatched — not necessarily
+	// finished yet) for the current augmentEpoch — refreshTable calls
+	// triggerAugmentForNewlyVisibleRows on every filter/facet/sort change,
+	// which uses this to avoid dispatching a duplicate request for a row
+	// already in flight, and to fire Augment only for rows not in this set,
+	// so widening or clearing a filter picks up augmentation for the
+	// newly-revealed rows instead of leaving them stuck at their
+	// placeholder forever. Reset (to an empty, non-nil map) by
+	// applyListResult alongside augmentEpoch.
+	augmentedRowIDs map[string]bool
+
+	// settledRowIDs tracks which of augmentedRowIDs have actually FINISHED
+	// — their owning batch reached its final tick and confirmed they were
+	// never rejected by wanted — as opposed to merely requested. This is
+	// the set that gets written to (and restored from) the list cache: a
+	// row can be marked in augmentedRowIDs the instant its batch is
+	// dispatched, well before it has any real data, so caching that set
+	// directly would let a still-in-flight (or fallback-batch-dispatched)
+	// row's placeholder get treated as settled forever if the user
+	// navigates away and back within the cache TTL before that batch
+	// finishes. Reset alongside augmentedRowIDs; always a subset of it.
+	settledRowIDs map[string]bool
+
+	// visibleRowIDs holds the current view's visible-row-ID set (map[string]bool),
+	// updated by refreshTable every time it recomputes what's actually
+	// shown (filter/facet/sort/base-row changes). It's an atomic.Value
+	// rather than a plain map because Augmentable.Augment's wanted callback
+	// reads it from arbitrary background goroutines — each Store swaps in a
+	// brand new map, so a concurrent Load always sees a complete, never-
+	// mutated-after-publish snapshot, no locking needed.
+	visibleRowIDs atomic.Value
+
+	// onAugmentRedrawForTest, if set, is called each time
+	// triggerAugmentForNewlyVisibleRows actually performs the throttled
+	// refreshTable+cache-write for an Augment tick (i.e. shouldRedrawAugmentTick
+	// returned true) — a test-only seam for counting real redraws directly,
+	// since wall-clock timing against a SimulationScreen doesn't reflect real
+	// terminal draw cost. Always nil in production.
+	onAugmentRedrawForTest func()
 
 	activeContent tview.Primitive
 
@@ -341,6 +383,23 @@ func (s *Shell) setTitle(title string) {
 	s.content.SetTitle(formatted)
 }
 
+// updateBorderColor tints s.content's border blue while a filter is active
+// on the currently visible list, so a filtered view is distinguishable at a
+// glance rather than only via the title-bar query suffix. Blue rather than
+// yellow, since yellow is already used for shortcut/header highlights
+// elsewhere and wouldn't stand out here. The border is shared by every page
+// in s.content (table/detail/error/help all live in the same Pages Box), so
+// this must be recomputed any time either the front page or s.filterQuery
+// changes — not just from refreshTable.
+func (s *Shell) updateBorderColor() {
+	front, _ := s.content.GetFrontPage()
+	if front == pageTable && s.filterQuery != "" {
+		s.content.SetBorderColor(tcell.ColorBlue)
+	} else {
+		s.content.SetBorderColor(tview.Styles.BorderColor)
+	}
+}
+
 // SetInfo renders the persistent header bar's left block (Taskcluster
 // root/version/client info), replacing the old ui.UI.SetTaskclusterInfo.
 func (s *Shell) SetInfo(root, version, clientID string, authenticated bool) {
@@ -394,6 +453,7 @@ func (s *Shell) openHelp() {
 	s.helpOpen = true
 	s.helpView.SetData(buildHelpText(s.registry))
 	s.content.SwitchToPage(pageHelp)
+	s.updateBorderColor()
 	s.app.SetFocus(s.helpView)
 }
 
@@ -405,5 +465,6 @@ func (s *Shell) closeHelp() {
 
 	s.helpOpen = false
 	s.content.SwitchToPage(s.preHelpPage)
+	s.updateBorderColor()
 	s.app.SetFocus(s.activeContent)
 }

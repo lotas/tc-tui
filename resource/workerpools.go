@@ -91,11 +91,29 @@ func (r *WorkerPoolsResource) List() ([]Row, error) {
 // GetTaskQueueCounts) and Errors (one bulk call), calling onUpdate after
 // every individual piece of data arrives so the shell can redraw
 // progressively instead of blocking until everything is in. See
-// resource.Augmentable.
-func (r *WorkerPoolsResource) Augment(rows []Row, onUpdate func(rows []Row, completed, total int)) {
+// resource.Augmentable. wanted is threaded straight into GetTaskQueueCounts,
+// which is the actual per-row cost at scale (one HTTP call per pool) —
+// GetWorkerPoolErrorCounts is a single bulk call regardless of row count, so
+// there's no API cost to save there by skipping a row, though wanted is
+// still honored when writing that result in so a skipped row's cells are
+// left untouched rather than filled in with data it was never "given".
+func (r *WorkerPoolsResource) Augment(rows []Row, wanted func(id string) bool, onUpdate func(rows []Row, completed, total int)) {
 	if len(rows) == 0 {
 		return
 	}
+
+	// rows' Cells slices may alias the caller's own row state (the shell
+	// keeps rows it hands to Augment and rows it renders backed by the same
+	// arrays), so mutating them in place below — from these goroutines,
+	// unsynchronized with whatever else reads that state on the UI thread —
+	// would be a data race. Working on an independent copy from the start
+	// avoids that regardless of what the caller does with its own rows.
+	working := make([]Row, len(rows))
+	for i, row := range rows {
+		working[i] = Row{ID: row.ID, Cells: append([]string(nil), row.Cells...), NavTarget: row.NavTarget}
+	}
+	rows = working
+
 	total := len(rows) + 1 // one tick per pool (pending/claimed) + one for the bulk errors call
 
 	var (
@@ -135,6 +153,9 @@ func (r *WorkerPoolsResource) Augment(rows []Row, onUpdate func(rows []Row, comp
 		errorCounts, err := r.tc.GetWorkerPoolErrorCounts()
 		mu.Lock()
 		for id, idx := range indexByID {
+			if !wanted(id) {
+				continue
+			}
 			if err == nil {
 				rows[idx].Cells[6] = fmt.Sprintf("%10d", errorCounts[id])
 			} else {
@@ -153,9 +174,14 @@ func (r *WorkerPoolsResource) Augment(rows []Row, onUpdate func(rows []Row, comp
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		r.tc.GetTaskQueueCounts(ids, func(id string, counts taskcluster.TaskQueueCounts) {
+		r.tc.GetTaskQueueCounts(ids, wanted, func(id string, counts taskcluster.TaskQueueCounts) {
 			mu.Lock()
-			if idx, ok := indexByID[id]; ok {
+			// wanted is rechecked here too — GetTaskQueueCounts's zero-value
+			// TaskQueueCounts{} for a skipped id (both Known flags false) is
+			// indistinguishable from a genuine fetch failure, and a
+			// genuinely-unwanted row must be left untouched, not written as
+			// "unavailable".
+			if idx, ok := indexByID[id]; ok && wanted(id) {
 				if counts.PendingKnown {
 					rows[idx].Cells[4] = fmt.Sprintf("%10d", counts.Pending)
 				} else {

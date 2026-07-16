@@ -23,12 +23,25 @@ func cacheKeyFor(res resource.Resource, scope, facetValue string) cacheKey {
 // ServerFaceted entries (FacetCounts is fetched paired with FacetList in
 // loadList, so it rides along in the same entry rather than getting its own
 // cache); it is nil otherwise. subtitle is similarly only populated for a
-// ScopeSubtitle resource; "" otherwise.
+// ScopeSubtitle resource; "" otherwise. settledIDs records which of rows
+// had actually FINISHED augmenting — their owning Augmentable.Augment batch
+// reached its final tick and confirmed they weren't rejected by wanted — as
+// of this snapshot (nil/empty right after the base fetch, before any
+// Augment call). Deliberately NOT "requested as of this snapshot": a row
+// can be marked requested the instant its batch is dispatched, well before
+// it has any real data, so caching that broader set would let a
+// still-in-flight row's placeholder get treated as settled forever if the
+// user navigates away and back within the cache TTL before its batch
+// finishes. A cache hit restores this into both Shell.augmentedRowIDs and
+// Shell.settledRowIDs, so it resumes augmenting whatever hadn't actually
+// finished yet instead of either re-requesting already-done rows or wrongly
+// treating still-unfinished (or never-even-requested) ones as settled.
 type cacheEntry struct {
-	rows      []resource.Row
-	counts    map[string]int
-	subtitle  string
-	fetchedAt time.Time
+	rows       []resource.Row
+	counts     map[string]int
+	subtitle   string
+	fetchedAt  time.Time
+	settledIDs map[string]bool
 }
 
 // listCache is a short-lived, session-lifetime cache of list/facet fetches,

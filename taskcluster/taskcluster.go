@@ -50,7 +50,7 @@ type Taskcluster interface {
 	GetRole(roleID string) (*tcauth.GetRoleResponse, error)
 	GetWorkerPools() (WorkerPoolList, error)
 	GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error)
-	GetTaskQueueCounts(workerPoolIDs []string, onEach func(workerPoolID string, counts TaskQueueCounts))
+	GetTaskQueueCounts(workerPoolIDs []string, wanted func(workerPoolID string) bool, onEach func(workerPoolID string, counts TaskQueueCounts))
 	GetWorkerPoolErrorCounts() (map[string]int, error)
 	GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (WorkerList, error)
 	GetWorkerPoolStateCounts(workerPoolID, launchConfigID string) (map[string]int, error)
@@ -230,12 +230,20 @@ type TaskQueueCounts struct {
 
 // GetTaskQueueCounts fetches pending/claimed counts for each of
 // workerPoolIDs concurrently, calling onEach exactly once per ID as each
-// pool's fetch completes (success or failure) — a worker pool's ID doubles
-// as its task queue's ID, and there is no bulk variant of this endpoint
-// (Taskcluster's own web UI fetches it the same way: one call per pool,
-// batched concurrently rather than sequentially). onEach is always called,
-// even when neither fallback below succeeds (both Known flags false), so a
-// caller counting ticks against len(workerPoolIDs) always reaches it.
+// pool's fetch completes (success, failure, or skipped — see wanted below) —
+// a worker pool's ID doubles as its task queue's ID, and there is no bulk
+// variant of this endpoint (Taskcluster's own web UI fetches it the same
+// way: one call per pool, batched concurrently rather than sequentially).
+// onEach is always called exactly once per id, so a caller counting ticks
+// against len(workerPoolIDs) always reaches it.
+//
+// wanted is consulted twice per id: once before it's even queued (skipping
+// it entirely, freeing that concurrency slot for one that IS wanted), and
+// again right after a slot actually frees up — since with a large
+// workerPoolIDs list most ids spend real time queued behind maxConcurrency,
+// and wanted's answer may have changed by the time a slot opens (e.g. the
+// caller applied a filter while a large batch was still draining). Pass
+// `func(string) bool { return true }` to fetch every id unconditionally.
 //
 // TaskQueueCounts (the combined, ideal call) requires both
 // queue:pending-count and queue:claimed-count scopes together, so a
@@ -249,7 +257,7 @@ type TaskQueueCounts struct {
 // but perfectly serviceable substitute for a single summary column, given
 // currently-claimed tasks are bounded by worker capacity rather than an
 // unbounded backlog.
-func (tc *TC) GetTaskQueueCounts(workerPoolIDs []string, onEach func(workerPoolID string, counts TaskQueueCounts)) {
+func (tc *TC) GetTaskQueueCounts(workerPoolIDs []string, wanted func(workerPoolID string) bool, onEach func(workerPoolID string, counts TaskQueueCounts)) {
 	const maxConcurrency = 24
 
 	var (
@@ -258,11 +266,21 @@ func (tc *TC) GetTaskQueueCounts(workerPoolIDs []string, onEach func(workerPoolI
 	)
 
 	for _, id := range workerPoolIDs {
+		if !wanted(id) {
+			onEach(id, TaskQueueCounts{})
+			continue
+		}
+
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(id string) {
 			defer wg.Done()
 			defer func() { <-sem }()
+
+			if !wanted(id) {
+				onEach(id, TaskQueueCounts{})
+				return
+			}
 
 			if counts, err := tc.queue.TaskQueueCounts(id); err == nil {
 				onEach(id, TaskQueueCounts{

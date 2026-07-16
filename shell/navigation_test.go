@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/taskcluster/tc-tui/resource"
+	"github.com/taskcluster/tc-tui/taskcluster"
 )
 
 // newTestShellForSort builds a Shell as if renderList had just populated a
@@ -93,6 +95,45 @@ func TestRenderListSetsUpClientFaceted(t *testing.T) {
 	if s.currentFacetValue != "" {
 		t.Fatalf("expected default facet value \"\" (All), got %q", s.currentFacetValue)
 	}
+}
+
+// renderList must clear out whatever the PREVIOUS resource/view left behind
+// synchronously, before its own (async) fetch has any chance to complete —
+// otherwise a sort/filter/facet keypress fired in that window would hand
+// the old, differently-shaped rows to the NEW resource's Augment. This is
+// exactly what used to panic: WorkerPoolsResource.Augment unconditionally
+// indexes Cells[4..6], which a row from some other resource may not have.
+func TestRenderListClearsStaleRowsBeforeNewResourcesFetchCompletes(t *testing.T) {
+	fake := &fakeWorkerPoolsTC{
+		pools: taskcluster.WorkerPoolList{{WorkerPoolID: "proj/pool-a", ProviderID: "gcp"}},
+	}
+	res := resource.NewWorkerPoolsResource(fake)
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := New(registry)
+	s.currentListResource = "other"
+	s.currentColumns = []resource.Column{{Title: "ONLY"}}
+	s.lastRows = []resource.Row{{ID: "x", Cells: []string{"one-cell-only"}}}
+	s.augmentedRowIDs = map[string]bool{"x": true}
+	s.visibleRowIDs.Store(map[string]bool{"x": true})
+
+	s.renderList(res, "", false)
+
+	if len(s.lastRows) != 0 {
+		t.Fatalf("expected lastRows cleared synchronously by renderList, got %+v", s.lastRows)
+	}
+	if len(s.augmentedRowIDs) != 0 {
+		t.Fatalf("expected augmentedRowIDs cleared synchronously by renderList, got %+v", s.augmentedRowIDs)
+	}
+	if ids, _ := s.visibleRowIDs.Load().(map[string]bool); len(ids) != 0 {
+		t.Fatalf("expected visibleRowIDs cleared synchronously by renderList, got %+v", ids)
+	}
+
+	// Would panic before the fix, since s.currentColumns is now
+	// WorkerPoolsResource's 7 columns but s.lastRows (if not cleared) still
+	// held the 1-cell row from "other".
+	s.toggleSort(0)
 }
 
 func TestRenderListSetsUpServerFacetedWithDefaultTab(t *testing.T) {
@@ -195,7 +236,7 @@ func TestApplyListResultBumpsAugmentEpoch(t *testing.T) {
 	s := newTestShellForSort()
 	before := s.augmentEpoch
 
-	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil, "")
+	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil, "", nil)
 
 	if s.augmentEpoch != before+1 {
 		t.Fatalf("expected augmentEpoch to increment by exactly 1, got %d (was %d)", s.augmentEpoch, before)
@@ -206,7 +247,7 @@ func TestApplyListResultResetsAugmentProgress(t *testing.T) {
 	s := newTestShellForSort()
 	s.augmentCompleted, s.augmentTotal = 3, 10
 
-	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil, "")
+	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil, "", nil)
 
 	if s.augmentCompleted != 0 || s.augmentTotal != 0 {
 		t.Fatalf("expected progress reset to 0/0, got %d/%d", s.augmentCompleted, s.augmentTotal)
@@ -381,6 +422,737 @@ func TestLoadListServesFromCacheWithoutFetching(t *testing.T) {
 	if _, called := res.lastCall(); called {
 		t.Fatalf("expected no fetch on a cache hit, but FacetList was called")
 	}
+}
+
+type fakeAugmentableResource struct {
+	fakeResource
+	rows []resource.Row
+	ttl  time.Duration // overrides fakeResource's default RefreshInterval() of 0
+
+	// pauseAfter/resume/done let a test simulate a large, slow-draining
+	// batch: Augment blocks after processing pauseAfter rows until resume
+	// is closed, giving the test a window to change what's visible before
+	// the rest of rows gets its wanted check. Left nil/zero, Augment just
+	// runs straight through — the tests that don't care about this behave
+	// exactly as before. done, if set, is closed once Augment returns.
+	pauseAfter int
+	resume     chan struct{}
+	done       chan struct{}
+
+	// pausePoints additionally blocks at these row indices (0-based, checked
+	// before that row's wanted check) until the corresponding channel is
+	// closed — lets a test inject a SECOND, independently-timed pause within
+	// one Augment call, e.g. to change what's visible between two specific
+	// rows rather than only once via pauseAfter/resume.
+	pausePoints map[int]chan struct{}
+
+	// callPause, if set for a given 0-based Augment CALL number (the Nth
+	// time Augment is invoked on this resource — e.g. call 0 is the
+	// initial dispatch, call 1 a nested/follow-up one triggered from
+	// within call 0's own tick handler), blocks that whole call before it
+	// processes even its first row. Unlike pauseAfter/pausePoints (which
+	// gate row indices WITHIN one call and would apply identically to
+	// every call sharing this same resource), this lets a test pause one
+	// SPECIFIC dispatch independently of any other — needed because a
+	// nested dispatch's rows can otherwise finish so fast (no real network
+	// delay) that there's no way to observe its in-flight state at all.
+	callPause map[int]chan struct{}
+	callCount int // guarded by mu
+
+	// tickOnUpdate, when true, calls onUpdate once per row (like a real
+	// Augmentable resource's progressive ticks) rather than only recording
+	// IDs — needed by tests that exercise the shell's own onUpdate/redraw
+	// handling (e.g. its redraw throttling), not just what Augment was
+	// asked for.
+	tickOnUpdate bool
+
+	mu           sync.Mutex
+	augmentedIDs []string
+}
+
+func (f *fakeAugmentableResource) List() ([]resource.Row, error) { return f.rows, nil }
+func (f *fakeAugmentableResource) RefreshInterval() time.Duration { return f.ttl }
+
+func (f *fakeAugmentableResource) Augment(rows []resource.Row, wanted func(id string) bool, onUpdate func(rows []resource.Row, completed, total int)) {
+	f.mu.Lock()
+	myCall := f.callCount
+	f.callCount++
+	f.mu.Unlock()
+	if ch, ok := f.callPause[myCall]; ok {
+		<-ch
+	}
+
+	for i, row := range rows {
+		if f.resume != nil && i == f.pauseAfter {
+			<-f.resume
+		}
+		if ch, ok := f.pausePoints[i]; ok {
+			<-ch
+		}
+		if wanted(row.ID) {
+			f.mu.Lock()
+			f.augmentedIDs = append(f.augmentedIDs, row.ID)
+			f.mu.Unlock()
+		}
+		if f.tickOnUpdate {
+			onUpdate(append([]resource.Row(nil), rows[:i+1]...), i+1, len(rows))
+		}
+	}
+	if f.done != nil {
+		close(f.done)
+	}
+}
+
+func (f *fakeAugmentableResource) recordedIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.augmentedIDs...)
+}
+
+// newRunningTestShell returns a Shell backed by a live tview.Application
+// (via a SimulationScreen, so no real terminal is needed). Most tests in
+// this file deliberately never call Application.Run() and only assert on
+// work a background goroutine does before its result reaches
+// QueueUpdateDraw (see waitFor's doc comment) — but loadList's Augment call
+// happens only after its own QueueUpdateDraw round-trip completes, which
+// blocks forever unless something is actually draining the update queue.
+func newRunningTestShell(t *testing.T, registry *resource.Registry) *Shell {
+	t.Helper()
+	s := New(registry)
+	startRunning(t, s)
+	return s
+}
+
+// startRunning starts s.app's event loop against a SimulationScreen (no real
+// terminal needed) and registers cleanup to stop it. Split out from
+// newRunningTestShell so a test can do setup that must NOT race the live
+// Draw loop (e.g. a synchronous cache-hit render, which mutates Shell/tview
+// state directly on the calling goroutine rather than via QueueUpdateDraw)
+// before the app is actually running.
+func startRunning(t *testing.T, s *Shell) {
+	t.Helper()
+
+	screen := tcell.NewSimulationScreen("")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("failed to init simulation screen: %v", err)
+	}
+	s.app.SetScreen(screen)
+
+	go s.app.Run()
+	t.Cleanup(s.app.Stop)
+}
+
+// A row hidden by the active filter shouldn't be handed to Augment at all —
+// enriching a row the user can't see is wasted API calls.
+func TestLoadListOnlyAugmentsFilterMatchingRows(t *testing.T) {
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		rows: []resource.Row{
+			{ID: "a", Cells: []string{"alpha"}},
+			{ID: "b", Cells: []string{"beta"}},
+		},
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := newRunningTestShell(t, registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.filterQuery = "alpha"
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	s.loadList(res, "", "", true, false, false)
+
+	waitFor(t, func() bool { return len(res.recordedIDs()) > 0 })
+
+	ids := res.recordedIDs()
+	if len(ids) != 1 || ids[0] != "a" {
+		t.Fatalf("expected only the filter-matching row to be augmented, got %+v", ids)
+	}
+}
+
+// Widening (or clearing) the filter after the initial load must retrigger
+// Augment for whatever newly became visible — otherwise those rows are
+// stuck at their placeholder forever, since Augment only ever ran once
+// against the filter active at load time.
+func TestClearingFilterAugmentsNewlyVisibleRows(t *testing.T) {
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		rows: []resource.Row{
+			{ID: "a", Cells: []string{"alpha"}},
+			{ID: "b", Cells: []string{"beta"}},
+		},
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := newRunningTestShell(t, registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.filterQuery = "alpha"
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	s.loadList(res, "", "", true, false, false)
+	waitFor(t, func() bool { return len(res.recordedIDs()) == 1 })
+
+	s.app.QueueUpdateDraw(func() {
+		s.filterQuery = ""
+		s.refreshTable()
+	})
+
+	waitFor(t, func() bool { return len(res.recordedIDs()) == 2 })
+
+	ids := res.recordedIDs()
+	if !(len(ids) == 2 && ids[0] == "a" && ids[1] == "b") {
+		t.Fatalf("expected row a then newly-revealed row b to be augmented, got %+v", ids)
+	}
+}
+
+func TestShouldRedrawAugmentTickAlwaysTrueOnFinalTick(t *testing.T) {
+	now := time.Now()
+	if !shouldRedrawAugmentTick(5, 5, now, now) {
+		t.Fatalf("expected the final tick (completed == total) to always redraw, even with lastRedraw == now")
+	}
+	if !shouldRedrawAugmentTick(6, 5, now, now) {
+		t.Fatalf("expected completed > total to also count as final")
+	}
+}
+
+func TestShouldRedrawAugmentTickThrottlesRapidNonFinalTicks(t *testing.T) {
+	now := time.Now()
+	lastRedraw := now
+	soon := now.Add(augmentRedrawInterval / 2)
+
+	if shouldRedrawAugmentTick(2, 10, lastRedraw, soon) {
+		t.Fatalf("expected a non-final tick within augmentRedrawInterval of the last redraw to be throttled")
+	}
+}
+
+func TestShouldRedrawAugmentTickRedrawsOnceIntervalElapses(t *testing.T) {
+	now := time.Now()
+	lastRedraw := now
+	later := now.Add(augmentRedrawInterval + time.Millisecond)
+
+	if !shouldRedrawAugmentTick(2, 10, lastRedraw, later) {
+		t.Fatalf("expected a non-final tick to redraw once augmentRedrawInterval has elapsed")
+	}
+}
+
+func TestMightMatchAugmentedColumn(t *testing.T) {
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{"5", true},
+		{"gcp5", true},
+		{"pool-5", true},
+		{"gcp", false},
+		{"proj/pool-a", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := mightMatchAugmentedColumn(c.query); got != c.want {
+			t.Errorf("mightMatchAugmentedColumn(%q) = %v, want %v", c.query, got, c.want)
+		}
+	}
+}
+
+// A purely alphabetic query that matches nothing is a definitive, complete
+// answer already — base columns are always fully known, and alphabetic text
+// can never match a numeric augmented column, so there is nothing the
+// fallback could possibly find by augmenting more rows. It must not walk
+// the hidden list for a plain typo.
+func TestFilterWithNoMatchesAndNoDigitsDoesNotTriggerFallback(t *testing.T) {
+	rows := []resource.Row{
+		{ID: "a", Cells: []string{"alpha"}},
+		{ID: "b", Cells: []string{"beta"}},
+	}
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		rows:         rows,
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := newRunningTestShell(t, registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.filterQuery = "zzzz" // matches nothing, no digits — a plain typo
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	s.loadList(res, "", "", true, false, false)
+
+	// Nothing should ever get dispatched — give it a moment to (wrongly)
+	// prove otherwise, since there's no positive event to wait for here.
+	time.Sleep(50 * time.Millisecond)
+	if ids := res.recordedIDs(); len(ids) != 0 {
+		t.Fatalf("expected no rows to be augmented for a non-matching, non-numeric filter, got %+v", ids)
+	}
+}
+
+// The fallback loop iterates s.lastRows independently of the visible loop
+// above it, so without its own "already staged this call" guard, a row
+// that's BOTH currently visible AND not yet augmented (the common case
+// right after a fresh load with a digit-bearing filter) would be appended
+// to toAugment twice — once from the visible loop, once again from the
+// fallback loop, since s.augmentedRowIDs isn't populated until
+// markRowsAugmented runs after both loops.
+func TestFallbackDoesNotDuplicateARowAlreadyStagedFromVisible(t *testing.T) {
+	rows := []resource.Row{
+		{ID: "a", Cells: []string{"pool-5"}}, // visible via its own cell AND a fallback candidate
+		{ID: "b", Cells: []string{"beta"}},
+	}
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		rows:         rows,
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := newRunningTestShell(t, registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.filterQuery = "5" // matches "a" directly, AND enables the fallback (has a digit)
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	s.loadList(res, "", "", true, false, false)
+
+	waitFor(t, func() bool { return len(res.recordedIDs()) >= 2 })
+
+	ids := res.recordedIDs()
+	seen := map[string]int{}
+	for _, id := range ids {
+		seen[id]++
+	}
+	if seen["a"] != 1 {
+		t.Fatalf("expected row a to be augmented exactly once, got %d times (%+v)", seen["a"], ids)
+	}
+}
+
+// Without the throttle, a big batch that ticks near-instantly (no network
+// round-trip pacing it, e.g. because wanted skipped most of it) would drive
+// hundreds of full refreshTable/SetData calls back to back, each blocking
+// the single UI goroutine — this is what made filter changes feel stuck.
+// With it, the whole burst should complete in about one redraw interval's
+// worth of wall-clock time, not hundreds.
+func TestAugmentRedrawThrottleKeepsLargeBurstFast(t *testing.T) {
+	const rowCount = 300
+
+	rows := make([]resource.Row, rowCount)
+	for i := range rows {
+		id := fmt.Sprintf("pool-%03d", i)
+		rows[i] = resource.Row{ID: id, Cells: []string{id}}
+	}
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		rows:         rows,
+		tickOnUpdate: true,
+		done:         make(chan struct{}),
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := newRunningTestShell(t, registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	// Count actual redraws directly via the test hook rather than
+	// wall-clock timing — a SimulationScreen's in-memory Draw() is far
+	// cheaper than a real terminal's, so timing alone wouldn't reliably
+	// distinguish throttled from unthrottled here even though the
+	// difference is very real against a real terminal.
+	var mu sync.Mutex
+	var redraws int
+	s.onAugmentRedrawForTest = func() {
+		mu.Lock()
+		redraws++
+		mu.Unlock()
+	}
+
+	s.loadList(res, "", "", true, false, false)
+
+	select {
+	case <-res.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Augment did not finish in time")
+	}
+
+	waitFor(t, func() bool {
+		var completed, total int
+		s.app.QueueUpdateDraw(func() { completed, total = s.augmentCompleted, s.augmentTotal })
+		return completed == rowCount && total == rowCount
+	})
+
+	if len(res.recordedIDs()) != rowCount {
+		t.Fatalf("expected all %d rows to be augmented, got %d", rowCount, len(res.recordedIDs()))
+	}
+
+	mu.Lock()
+	got := redraws
+	mu.Unlock()
+	// Without throttling this would be rowCount (300) redraws — one per
+	// tick. With it, only ticks at least augmentRedrawInterval apart
+	// actually redraw, so a burst this fast should collapse to a small
+	// constant number regardless of rowCount (generous margin: well under
+	// rowCount, not a tight bound on the exact count).
+	if got >= rowCount/10 {
+		t.Fatalf("expected far fewer than %d redraws for a %d-row burst, got %d — throttling may not be working", rowCount/10, rowCount, got)
+	}
+}
+
+// The scenario a large fxci-scale worker pool list runs into: Augment gets
+// dispatched for a big unfiltered batch, and while it's still working
+// through it (most rows still queued, per Augmentable.Augment's own
+// concurrency), the user narrows the filter. Rows not yet reached at that
+// point must be skipped via wanted rather than dutifully processed anyway —
+// this is what actually stops wasted API calls, as opposed to
+// TestLoadListOnlyAugmentsFilterMatchingRows which only covers not
+// REQUESTING a row Augment was never even asked about.
+func TestNarrowingFilterMidBatchSkipsRowsNoLongerVisible(t *testing.T) {
+	rows := make([]resource.Row, 0, 5)
+	for _, id := range []string{"a", "b", "c", "d", "e"} {
+		rows = append(rows, resource.Row{ID: id, Cells: []string{id}})
+	}
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		rows:         rows,
+		pauseAfter:   2, // processes a, b, then blocks until the test says go
+		resume:       make(chan struct{}),
+		done:         make(chan struct{}),
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := newRunningTestShell(t, registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	s.loadList(res, "", "", true, false, false)
+	waitFor(t, func() bool { return len(res.recordedIDs()) == 2 })
+
+	// Narrow the filter to just "a" — c, d, e (not yet reached) are now
+	// invisible; b (already recorded before the pause) stays recorded,
+	// matching Augment's contract that wanted is a live, per-row check, not
+	// a retroactive undo.
+	s.app.QueueUpdateDraw(func() {
+		s.filterQuery = "a"
+		s.refreshTable()
+	})
+	close(res.resume)
+
+	select {
+	case <-res.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Augment did not finish in time")
+	}
+
+	ids := res.recordedIDs()
+	if len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
+		t.Fatalf("expected c, d, e to be skipped once no longer visible, got %+v", ids)
+	}
+}
+
+// Rows Augment skipped because wanted rejected them must not stay marked
+// "augmented" forever — otherwise widening the filter back out (or clearing
+// it) would never retry them, leaving them stuck at their placeholder
+// indefinitely, even though the whole point of skipping was "not right
+// now", not "never".
+func TestWideningFilterAfterMidBatchSkipRetriesThoseRows(t *testing.T) {
+	rows := make([]resource.Row, 0, 5)
+	for _, id := range []string{"a", "b", "c", "d", "e"} {
+		rows = append(rows, resource.Row{ID: id, Cells: []string{id}})
+	}
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		rows:         rows,
+		pauseAfter:   2, // processes a, b, then blocks until the test says go
+		resume:       make(chan struct{}),
+		tickOnUpdate: true, // the unmark-on-final-tick logic lives inside onUpdate
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := newRunningTestShell(t, registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	s.loadList(res, "", "", true, false, false)
+	waitFor(t, func() bool { return len(res.recordedIDs()) == 2 })
+
+	// Narrow the filter — c, d, e (not yet reached) get skipped by wanted.
+	s.app.QueueUpdateDraw(func() {
+		s.filterQuery = "a"
+		s.refreshTable()
+	})
+	close(res.resume)
+
+	// Wait for the batch's final tick (where the just-skipped rows get
+	// un-marked) to actually land before widening back out.
+	waitFor(t, func() bool {
+		var completed, total int
+		s.app.QueueUpdateDraw(func() { completed, total = s.augmentCompleted, s.augmentTotal })
+		return total == 5 && completed == total
+	})
+
+	// Clear the filter — c, d, e are visible again.
+	s.app.QueueUpdateDraw(func() {
+		s.filterQuery = ""
+		s.refreshTable()
+	})
+
+	waitFor(t, func() bool {
+		seen := map[string]bool{}
+		for _, id := range res.recordedIDs() {
+			seen[id] = true
+		}
+		return seen["c"] && seen["d"] && seen["e"]
+	})
+}
+
+// A row can be rejected by wanted while the filter is narrow and then become
+// visible again BEFORE the batch's final tick — re-checking wanted() only at
+// that final tick (rather than recording every rejection as it happens)
+// would see the row as visible again and wrongly leave it marked
+// "augmented" despite it never having actually been fetched. This
+// reproduces exactly that race: c is rejected, then the filter widens back
+// out while the batch is still mid-flight (before c's own tick even lands),
+// so by the final tick wanted(c) would say true.
+func TestRowRejectedThenVisibleAgainBeforeBatchEndsStillGetsRetried(t *testing.T) {
+	rows := make([]resource.Row, 0, 5)
+	for _, id := range []string{"a", "b", "c", "d", "e"} {
+		rows = append(rows, resource.Row{ID: id, Cells: []string{id}})
+	}
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		rows:         rows,
+		pauseAfter:   2, // pause before c (index 2), after a, b are done
+		resume:       make(chan struct{}),
+		pausePoints: map[int]chan struct{}{
+			3: make(chan struct{}), // pause again before d (index 3), after c's own wanted check
+		},
+		tickOnUpdate: true, // the rejection-tracking/unmark logic lives inside onUpdate
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := newRunningTestShell(t, registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	s.loadList(res, "", "", true, false, false)
+	waitFor(t, func() bool { return len(res.recordedIDs()) == 2 }) // a, b done
+
+	// Narrow the filter — c (about to be checked) will be rejected.
+	s.app.QueueUpdateDraw(func() {
+		s.filterQuery = "a"
+		s.refreshTable()
+	})
+	close(res.resume) // let c's own wanted check run narrow, then it pauses again before d
+
+	waitFor(t, func() bool {
+		var completed int
+		s.app.QueueUpdateDraw(func() { completed = s.augmentCompleted })
+		return completed == 3 // a, b, c's tick has landed (c itself skipped)
+	})
+
+	// Widen back out BEFORE the batch's final tick (d, e haven't run yet) —
+	// c is visible again well before completed reaches total.
+	s.app.QueueUpdateDraw(func() {
+		s.filterQuery = ""
+		s.refreshTable()
+	})
+	close(res.pausePoints[3])
+
+	waitFor(t, func() bool {
+		seen := map[string]bool{}
+		for _, id := range res.recordedIDs() {
+			seen[id] = true
+		}
+		return seen["c"]
+	})
+}
+
+// With no filter active, every row is visible, so every row should still be
+// augmented — this fix must not change behavior for the common unfiltered
+// case.
+func TestLoadListAugmentsAllRowsWhenUnfiltered(t *testing.T) {
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		rows: []resource.Row{
+			{ID: "a", Cells: []string{"alpha"}},
+			{ID: "b", Cells: []string{"beta"}},
+		},
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := newRunningTestShell(t, registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	s.loadList(res, "", "", true, false, false)
+
+	waitFor(t, func() bool { return len(res.recordedIDs()) == 2 })
+}
+
+// A cache hit's rows are assumed already settled (whatever a prior Augment
+// run last merged into them before caching) — loadList must not re-trigger
+// Augment for them just because refreshTable ran.
+func TestLoadListCacheHitDoesNotReAugmentRowsAlreadyMarkedDone(t *testing.T) {
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		ttl:          time.Minute,
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := New(registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.cache.set(cacheKeyFor(res, "", ""), cacheEntry{
+		rows:       []resource.Row{{ID: "a", Cells: []string{"alpha"}}},
+		fetchedAt:  time.Now(),
+		settledIDs: map[string]bool{"a": true},
+	})
+
+	s.loadList(res, "", "", true, false, false)
+
+	if ids := res.recordedIDs(); len(ids) != 0 {
+		t.Fatalf("expected no Augment call for a row the cache already marked done, got %+v", ids)
+	}
+}
+
+// A cache entry written before Augment ever ran for a row (e.g. it was
+// hidden by a narrower filter at the time it was cached) must NOT be treated
+// as settled just because it came from the cache — this is the bug from a
+// prior fix attempt: blindly marking every cache-hit row as done meant a row
+// that was never actually augmented got permanently stuck at its
+// placeholder for the lifetime of that cache entry.
+func TestLoadListCacheHitStillAugmentsRowsNotYetMarkedDone(t *testing.T) {
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		ttl:          time.Minute,
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	// s.loadList's cache-hit branch renders synchronously on whatever
+	// goroutine calls it (no background fetch involved) — do that here,
+	// before the app is running, so it can't race the live Draw loop.
+	// startRunning is only needed afterward, for the async Augment call
+	// triggerAugmentForNewlyVisibleRows fires for row "b".
+	s := New(registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+	s.cache.set(cacheKeyFor(res, "", ""), cacheEntry{
+		rows:       []resource.Row{{ID: "a", Cells: []string{"alpha"}}, {ID: "b", Cells: []string{"beta"}}},
+		fetchedAt:  time.Now(),
+		settledIDs: map[string]bool{"a": true}, // "b" was never actually augmented
+	})
+
+	s.loadList(res, "", "", true, false, false)
+	startRunning(t, s)
+
+	waitFor(t, func() bool { return len(res.recordedIDs()) > 0 })
+
+	ids := res.recordedIDs()
+	if len(ids) != 1 || ids[0] != "b" {
+		t.Fatalf("expected only row b (not yet marked done) to be augmented, got %+v", ids)
+	}
+}
+
+// refreshTable, called from within an Augment tick's own handler, may
+// itself dispatch a BRAND NEW batch (e.g. for a row that just became
+// visible) before that handler writes to the cache. That new batch's rows
+// get marked "requested" (s.augmentedRowIDs) the instant they're
+// dispatched, well before they've had any chance to actually fetch
+// anything — the cache write right after must not treat them as settled,
+// or navigating away and back within the cache TTL would see their
+// still-placeholder cells as done forever.
+func TestCacheWriteFromOneBatchDoesNotSettleANestedlyDispatchedBatch(t *testing.T) {
+	rows := []resource.Row{
+		{ID: "a", Cells: []string{"a"}},
+		{ID: "b", Cells: []string{"b"}},
+	}
+	batch2Pause := make(chan struct{})
+	res := &fakeAugmentableResource{
+		fakeResource: fakeResource{name: "widgets"},
+		rows:         rows,
+		ttl:          time.Minute, // cache.get requires ttl > 0 to ever return a hit
+		pauseAfter:   0,           // block call 0 (batch 1) before processing "a" at all
+		resume:       make(chan struct{}),
+		// call 1 is batch 2 (the nested dispatch for "b") — held here so
+		// the test can observe the cache write batch 1 makes DURING batch
+		// 2's in-flight window; without this, batch 2's own trivial,
+		// synchronous fake work finishes essentially instantly (no real
+		// network delay), leaving no observable gap at all.
+		callPause:    map[int]chan struct{}{1: batch2Pause},
+		tickOnUpdate: true,
+	}
+	registry := resource.NewRegistry()
+	registry.Register(res)
+
+	s := newRunningTestShell(t, registry)
+	s.currentListResource = "widgets"
+	s.currentColumns = []resource.Column{{Title: "ID"}}
+	s.filterQuery = "a" // only "a" visible initially — batch 1 is just ["a"]
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	s.loadList(res, "", "", true, false, false)
+
+	// markRowsAugmented runs synchronously, before the fetch goroutine (and
+	// its eventual pause) even starts — reliable to wait on.
+	waitFor(t, func() bool {
+		var marked bool
+		s.app.QueueUpdateDraw(func() { marked = s.augmentedRowIDs["a"] })
+		return marked
+	})
+
+	// Widen the filter WITHOUT calling refreshTable ourselves. "b" only
+	// becomes visible once batch 1's own (single, final) tick fires and
+	// calls refreshTable internally — which is what dispatches batch 2 for
+	// "b" from WITHIN that tick's handler, immediately before its cache
+	// write. Calling refreshTable directly here instead would dispatch
+	// batch 2 right now, from this goroutine, not reproducing the nested
+	// case at all.
+	s.app.QueueUpdateDraw(func() { s.filterQuery = "" })
+
+	close(res.resume) // let batch 1 process "a" and fire its one (final) tick
+
+	// Wait for batch 2 (nested, for "b") to actually be dispatched —
+	// markRowsAugmented for it runs synchronously inside batch 1's tick
+	// handler, before batch 2's goroutine is even started, so this is safe
+	// to wait on even though batch 2 itself is still held on callPause[1].
+	waitFor(t, func() bool {
+		var marked bool
+		s.app.QueueUpdateDraw(func() { marked = s.augmentedRowIDs["b"] })
+		return marked
+	})
+
+	// The cache write triggered by batch 1's tick handler (the same one
+	// that just dispatched batch 2) must not list "b" as settled — batch 2
+	// is still blocked on callPause[1] and hasn't fetched anything yet.
+	var settled map[string]bool
+	s.app.QueueUpdateDraw(func() {
+		entry, ok := s.cache.get(cacheKeyFor(res, "", ""), res.RefreshInterval())
+		if ok {
+			settled = entry.settledIDs
+		}
+	})
+	if settled["b"] {
+		t.Fatalf("expected b (a nested, not-yet-started batch) to NOT be cached as settled, got %+v", settled)
+	}
+	if !settled["a"] {
+		t.Fatalf("expected a (batch 1, actually finished) to be cached as settled, got %+v", settled)
+	}
+
+	close(batch2Pause) // let batch 2 finish so it doesn't leak
 }
 
 func TestLoadListForceRefreshBypassesCache(t *testing.T) {
