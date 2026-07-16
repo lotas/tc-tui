@@ -4,8 +4,8 @@ go 1.26.4
 
 require (
 	github.com/charmbracelet/glamour v1.0.0
-	github.com/gdamore/tcell/v2 v2.4.1-0.20210905002822-f057f0a857a1
-	github.com/rivo/tview v0.0.0-20220307222120-9994674d60a8
+	github.com/gdamore/tcell/v2 v2.8.1
+	github.com/rivo/tview v0.42.0
 	github.com/taskcluster/taskcluster-lib-urls v13.0.1+incompatible
 	github.com/taskcluster/taskcluster/v101 v101.0.0
 	sigs.k8s.io/yaml v1.6.0
@@ -26,7 +26,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/fatih/camelcase v1.0.0 // indirect
-	github.com/gdamore/encoding v1.0.0 // indirect
+	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/johncgriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
