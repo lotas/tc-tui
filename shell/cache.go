@@ -36,12 +36,18 @@ func cacheKeyFor(res resource.Resource, scope, facetValue string) cacheKey {
 // Shell.settledRowIDs, so it resumes augmenting whatever hadn't actually
 // finished yet instead of either re-requesting already-done rows or wrongly
 // treating still-unfinished (or never-even-requested) ones as settled.
+// truncated records whether rows was capped at the safe fetch limit with
+// more left unfetched server-side (see resource.PartialLister) — restored on
+// a cache hit so the "[N+]" indicator survives navigating away and back, and
+// checked by loadList so a capped snapshot can't satisfy a load once the
+// user has asked for everything.
 type cacheEntry struct {
 	rows       []resource.Row
 	counts     map[string]int
 	subtitle   string
 	fetchedAt  time.Time
 	settledIDs map[string]bool
+	truncated  bool
 }
 
 // listCache is a short-lived, session-lifetime cache of list/facet fetches,

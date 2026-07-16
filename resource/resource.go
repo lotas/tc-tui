@@ -1,6 +1,10 @@
 package resource
 
-import "time"
+import (
+	"time"
+
+	"github.com/taskcluster/tc-tui/taskcluster"
+)
 
 // Column describes one column of a Resource's list view. Width and Expand
 // are independent: Width is a truncation cap (removed entirely by the 'x'
@@ -165,6 +169,31 @@ type ServerFaceted interface {
 	FacetOptions() []string                          // ordered; first is the default/initial tab
 	FacetList(scope, value string) ([]Row, error)     // fetches only rows matching this tab
 	FacetCounts(scope string) (map[string]int, error) // cheap aggregate counts per tab value; no row fetch
+}
+
+// PartialLister is implemented by resources whose backing API can return
+// thousands of rows for a single list (a big task group's tasks, a pool's
+// stopped workers, a deep task queue's backlog). When implemented, the shell
+// fetches rows via ListPartial INSTEAD of List/ScopedList/FacetList — first
+// with loadAll=false, letting the resource cap the fetch at a safe limit
+// (taskcluster.DefaultListLimit) and report via more whether rows were left
+// unfetched server-side. The shell surfaces truncation as a "[N+]" title
+// suffix and offers the 'L' key to re-issue the fetch with loadAll=true.
+// facetValue carries the active facet tab for a ServerFaceted resource
+// (whose FacetCounts is still used for the tab bar); "" otherwise.
+type PartialLister interface {
+	Resource
+	ListPartial(scope, facetValue string, loadAll bool) (rows []Row, more bool, err error)
+}
+
+// partialListLimit maps a PartialLister's loadAll flag onto the taskcluster
+// client's limit convention (0 = no cap) — shared by every ListPartial
+// implementation.
+func partialListLimit(loadAll bool) int {
+	if loadAll {
+		return 0
+	}
+	return taskcluster.DefaultListLimit
 }
 
 // ScopeActions is implemented by a ScopedResource whose scope has sibling

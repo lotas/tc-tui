@@ -236,7 +236,7 @@ func TestApplyListResultBumpsAugmentEpoch(t *testing.T) {
 	s := newTestShellForSort()
 	before := s.augmentEpoch
 
-	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil, "", nil)
+	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil, "", nil, false)
 
 	if s.augmentEpoch != before+1 {
 		t.Fatalf("expected augmentEpoch to increment by exactly 1, got %d (was %d)", s.augmentEpoch, before)
@@ -247,7 +247,7 @@ func TestApplyListResultResetsAugmentProgress(t *testing.T) {
 	s := newTestShellForSort()
 	s.augmentCompleted, s.augmentTotal = 3, 10
 
-	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil, "", nil)
+	s.applyListResult(fakeResource{name: "widgets"}, s.lastRows, nil, "", nil, false)
 
 	if s.augmentCompleted != 0 || s.augmentTotal != 0 {
 		t.Fatalf("expected progress reset to 0/0, got %d/%d", s.augmentCompleted, s.augmentTotal)

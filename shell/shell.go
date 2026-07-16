@@ -66,6 +66,19 @@ type Shell struct {
 	currentDetailActions []resource.DetailAction
 	currentDetailTitle   string
 
+	// currentListTruncated reports whether the current list view's rows were
+	// capped at the safe fetch limit with more left unfetched server-side
+	// (see resource.PartialLister) — drives refreshTable's "[N+]" title
+	// suffix and the 'L' load-all key and hint.
+	currentListTruncated bool
+
+	// loadAllKeys remembers, per list cache key, that the user asked for the
+	// full uncapped fetch ('L') — consulted by loadList so later loads of
+	// the same view (auto-refresh ticks, navigating back within the cache
+	// TTL) stay uncapped instead of silently reverting to the capped first
+	// fetch.
+	loadAllKeys map[cacheKey]bool
+
 	currentSort    SortState
 	sortByResource map[string]SortState
 
@@ -203,6 +216,7 @@ func New(registry *resource.Registry) *Shell {
 		sortByResource:   make(map[string]SortState),
 		facetByResource:  make(map[string]string),
 		filterByResource: make(map[string]string),
+		loadAllKeys:      make(map[cacheKey]bool),
 		cache:            newListCache(),
 		openBrowser:      openBrowser,
 	}
@@ -349,6 +363,12 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case pageDetail:
 			s.toggleDetailWrap()
 		}
+		return nil
+	// The condition is part of the case so that an 'L' pressed anywhere a
+	// truncated list ISN'T front falls through to the detail-action keys
+	// below instead of being swallowed.
+	case event.Rune() == 'L' && s.canLoadAllRows():
+		s.loadAllRows()
 		return nil
 	}
 

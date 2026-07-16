@@ -56,13 +56,21 @@ func (r *WorkersResource) FacetOptions() []string {
 // workerPoolId::launchConfigId compound (narrowed to one launch config, e.g.
 // when reached from a Launch Config's Detail view).
 func (r *WorkersResource) FacetList(scope, state string) ([]Row, error) {
+	rows, _, err := r.ListPartial(scope, state, false)
+	return rows, err
+}
+
+// ListPartial fetches the workers in one state (facetValue) capped at the
+// safe limit unless loadAll is set — even a single state's list can run to
+// tens of thousands of rows (stopped workers). See resource.PartialLister.
+func (r *WorkersResource) ListPartial(scope, state string, loadAll bool) ([]Row, bool, error) {
 	workerPoolID, launchConfigID := parseScope(scope)
-	workers, err := r.tc.GetWorkersForWorkerPool(workerPoolID, launchConfigID, state)
+	workers, more, err := r.tc.GetWorkersForWorkerPool(workerPoolID, launchConfigID, state, partialListLimit(loadAll))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return workerRows(workers), nil
+	return workerRows(workers), more, nil
 }
 
 // FacetCounts returns worker counts by state without fetching any worker

@@ -71,12 +71,19 @@ func (r *TasksResource) List() ([]Row, error) {
 }
 
 func (r *TasksResource) ScopedList(taskGroupID string) ([]Row, error) {
-	tasks, err := r.tc.GetTaskGroupTasks(taskGroupID)
+	rows, _, err := r.ListPartial(taskGroupID, "", false)
+	return rows, err
+}
+
+// ListPartial fetches the group's tasks capped at the safe limit unless
+// loadAll is set — see resource.PartialLister.
+func (r *TasksResource) ListPartial(taskGroupID, _ string, loadAll bool) ([]Row, bool, error) {
+	tasks, more, err := r.tc.GetTaskGroupTasks(taskGroupID, partialListLimit(loadAll))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return taskListRows(tasks), nil
+	return taskListRows(tasks), more, nil
 }
 
 func (r *TasksResource) EmptyScopeResource() string {

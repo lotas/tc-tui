@@ -37,9 +37,16 @@ func (r *PendingTasksResource) List() ([]Row, error) {
 }
 
 func (r *PendingTasksResource) ScopedList(taskQueueID string) ([]Row, error) {
-	tasks, err := r.tc.GetPendingTasks(taskQueueID)
+	rows, _, err := r.ListPartial(taskQueueID, "", false)
+	return rows, err
+}
+
+// ListPartial fetches the queue's pending tasks capped at the safe limit
+// unless loadAll is set — see resource.PartialLister.
+func (r *PendingTasksResource) ListPartial(taskQueueID, _ string, loadAll bool) ([]Row, bool, error) {
+	tasks, more, err := r.tc.GetPendingTasks(taskQueueID, partialListLimit(loadAll))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	rows := make([]Row, 0, len(tasks))
@@ -57,7 +64,7 @@ func (r *PendingTasksResource) ScopedList(taskQueueID string) ([]Row, error) {
 		})
 	}
 
-	return rows, nil
+	return rows, more, nil
 }
 
 func (r *PendingTasksResource) EmptyScopeResource() string {
@@ -119,9 +126,16 @@ func (r *ClaimedTasksResource) List() ([]Row, error) {
 }
 
 func (r *ClaimedTasksResource) ScopedList(taskQueueID string) ([]Row, error) {
-	tasks, err := r.tc.GetClaimedTasks(taskQueueID)
+	rows, _, err := r.ListPartial(taskQueueID, "", false)
+	return rows, err
+}
+
+// ListPartial fetches the queue's claimed tasks capped at the safe limit
+// unless loadAll is set — see resource.PartialLister.
+func (r *ClaimedTasksResource) ListPartial(taskQueueID, _ string, loadAll bool) ([]Row, bool, error) {
+	tasks, more, err := r.tc.GetClaimedTasks(taskQueueID, partialListLimit(loadAll))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	rows := make([]Row, 0, len(tasks))
@@ -138,7 +152,7 @@ func (r *ClaimedTasksResource) ScopedList(taskQueueID string) ([]Row, error) {
 		})
 	}
 
-	return rows, nil
+	return rows, more, nil
 }
 
 func (r *ClaimedTasksResource) EmptyScopeResource() string {

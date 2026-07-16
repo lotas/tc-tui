@@ -47,6 +47,8 @@ type fakeTaskcluster struct {
 	workersErr            error
 	workersState          string // last `state` param GetWorkersForWorkerPool was called with
 	workersLaunchConfigID string // last `launchConfigId` param GetWorkersForWorkerPool was called with
+	workersLimit          int    // last `limit` param GetWorkersForWorkerPool was called with
+	workersTruncated      bool   // truncated value GetWorkersForWorkerPool returns
 
 	stateCounts               map[string]int
 	stateCountsErr            error
@@ -81,17 +83,23 @@ type fakeTaskcluster struct {
 	taskGroup    *tcqueue.TaskGroupDefinitionResponse
 	taskGroupErr error
 
-	taskGroupTasks    taskcluster.TaskGroupTaskList
-	taskGroupTasksErr error
+	taskGroupTasks          taskcluster.TaskGroupTaskList
+	taskGroupTasksErr       error
+	taskGroupTasksLimit     int  // last `limit` param GetTaskGroupTasks was called with
+	taskGroupTasksTruncated bool // truncated value GetTaskGroupTasks returns
 
 	dependentTasks    taskcluster.TaskGroupTaskList
 	dependentTasksErr error
 
-	pendingTasks    taskcluster.PendingTaskList
-	pendingTasksErr error
+	pendingTasks          taskcluster.PendingTaskList
+	pendingTasksErr       error
+	pendingTasksLimit     int  // last `limit` param GetPendingTasks was called with
+	pendingTasksTruncated bool // truncated value GetPendingTasks returns
 
-	claimedTasks    taskcluster.ClaimedTaskList
-	claimedTasksErr error
+	claimedTasks          taskcluster.ClaimedTaskList
+	claimedTasksErr       error
+	claimedTasksLimit     int  // last `limit` param GetClaimedTasks was called with
+	claimedTasksTruncated bool // truncated value GetClaimedTasks returns
 
 	artifacts    taskcluster.ArtifactList
 	artifactsErr error
@@ -164,10 +172,11 @@ func (f *fakeTaskcluster) GetWorkerPoolErrorCounts() (map[string]int, error) {
 	return f.workerPoolErrorCounts, f.workerPoolErrorCountsErr
 }
 
-func (f *fakeTaskcluster) GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (taskcluster.WorkerList, error) {
+func (f *fakeTaskcluster) GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string, limit int) (taskcluster.WorkerList, bool, error) {
 	f.workersState = state
 	f.workersLaunchConfigID = launchConfigID
-	return f.workers, f.workersErr
+	f.workersLimit = limit
+	return f.workers, f.workersTruncated, f.workersErr
 }
 
 func (f *fakeTaskcluster) GetWorkerPoolStateCounts(workerPoolID, launchConfigID string) (map[string]int, error) {
@@ -213,20 +222,23 @@ func (f *fakeTaskcluster) GetTaskGroup(taskGroupID string) (*tcqueue.TaskGroupDe
 	return f.taskGroup, f.taskGroupErr
 }
 
-func (f *fakeTaskcluster) GetTaskGroupTasks(taskGroupID string) (taskcluster.TaskGroupTaskList, error) {
-	return f.taskGroupTasks, f.taskGroupTasksErr
+func (f *fakeTaskcluster) GetTaskGroupTasks(taskGroupID string, limit int) (taskcluster.TaskGroupTaskList, bool, error) {
+	f.taskGroupTasksLimit = limit
+	return f.taskGroupTasks, f.taskGroupTasksTruncated, f.taskGroupTasksErr
 }
 
 func (f *fakeTaskcluster) GetDependentTasks(taskID string) (taskcluster.TaskGroupTaskList, error) {
 	return f.dependentTasks, f.dependentTasksErr
 }
 
-func (f *fakeTaskcluster) GetPendingTasks(taskQueueID string) (taskcluster.PendingTaskList, error) {
-	return f.pendingTasks, f.pendingTasksErr
+func (f *fakeTaskcluster) GetPendingTasks(taskQueueID string, limit int) (taskcluster.PendingTaskList, bool, error) {
+	f.pendingTasksLimit = limit
+	return f.pendingTasks, f.pendingTasksTruncated, f.pendingTasksErr
 }
 
-func (f *fakeTaskcluster) GetClaimedTasks(taskQueueID string) (taskcluster.ClaimedTaskList, error) {
-	return f.claimedTasks, f.claimedTasksErr
+func (f *fakeTaskcluster) GetClaimedTasks(taskQueueID string, limit int) (taskcluster.ClaimedTaskList, bool, error) {
+	f.claimedTasksLimit = limit
+	return f.claimedTasks, f.claimedTasksTruncated, f.claimedTasksErr
 }
 
 func (f *fakeTaskcluster) GetArtifacts(taskID string, runID int64) (taskcluster.ArtifactList, error) {

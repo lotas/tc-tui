@@ -25,6 +25,13 @@ import (
 
 const PageSize = "150"
 
+// DefaultListLimit is the safe row cap for list fetches that can otherwise
+// run to thousands of items (a big task group's tasks, a pool's stopped
+// workers, a deep task queue's backlog) — enough to be useful immediately
+// without grinding through dozens of pages nobody asked for. Methods taking
+// a `limit` parameter treat 0 as "no cap"; see paginateUpTo.
+const DefaultListLimit = 1000
+
 type RolesList []tcauth.GetRoleResponse
 type WorkerPoolList []tcworkermanager.WorkerPoolFullDefinition
 type WorkerList []tcworkermanager.WorkerFullDefinition
@@ -52,7 +59,7 @@ type Taskcluster interface {
 	GetWorkerPool(workerPoolID string) (*tcworkermanager.WorkerPoolFullDefinition, error)
 	GetTaskQueueCounts(workerPoolIDs []string, wanted func(workerPoolID string) bool, onEach func(workerPoolID string, counts TaskQueueCounts))
 	GetWorkerPoolErrorCounts() (map[string]int, error)
-	GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (WorkerList, error)
+	GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string, limit int) (WorkerList, bool, error)
 	GetWorkerPoolStateCounts(workerPoolID, launchConfigID string) (map[string]int, error)
 	GetWorker(workerPoolID, workerGroup, workerID string) (*tcworkermanager.WorkerFullDefinition, error)
 	GetWorkerRecentTasks(workerPoolID, workerGroup, workerID string) ([]tcqueue.TaskRun, error)
@@ -64,10 +71,10 @@ type Taskcluster interface {
 	GetTask(taskID string) (*tcqueue.TaskDefinitionResponse, error)
 	GetTaskStatus(taskID string) (*tcqueue.TaskStatusStructure, error)
 	GetTaskGroup(taskGroupID string) (*tcqueue.TaskGroupDefinitionResponse, error)
-	GetTaskGroupTasks(taskGroupID string) (TaskGroupTaskList, error)
+	GetTaskGroupTasks(taskGroupID string, limit int) (TaskGroupTaskList, bool, error)
 	GetDependentTasks(taskID string) (TaskGroupTaskList, error)
-	GetPendingTasks(taskQueueID string) (PendingTaskList, error)
-	GetClaimedTasks(taskQueueID string) (ClaimedTaskList, error)
+	GetPendingTasks(taskQueueID string, limit int) (PendingTaskList, bool, error)
+	GetClaimedTasks(taskQueueID string, limit int) (ClaimedTaskList, bool, error)
 	GetArtifacts(taskID string, runID int64) (ArtifactList, error)
 	GetArtifactContent(taskID string, runID int64, name string) (content string, contentType string, truncated bool, err error)
 	GetArtifactURL(taskID string, runID int64, name string) (string, error)
@@ -294,7 +301,7 @@ func (tc *TC) GetTaskQueueCounts(workerPoolIDs []string, wanted func(workerPoolI
 			if pending, err := tc.queue.PendingTasks(id); err == nil {
 				result.Pending, result.PendingKnown = pending.PendingTasks, true
 			}
-			if claimed, err := tc.GetClaimedTasks(id); err == nil {
+			if claimed, _, err := tc.GetClaimedTasks(id, 0); err == nil {
 				result.Claimed, result.ClaimedKnown = int64(len(claimed)), true
 			}
 			onEach(id, result)
@@ -325,8 +332,12 @@ func (tc *TC) GetWorkerPoolErrorCounts() (map[string]int, error) {
 	return counts, nil
 }
 
-func (tc *TC) GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string) (WorkerList, error) {
-	workers, err := paginate(func(cont string) ([]tcworkermanager.WorkerFullDefinition, string, error) {
+// GetWorkersForWorkerPool lists a pool's workers in one state, fetching at
+// most limit rows (0 = all; see paginateUpTo) — a pool can have tens of
+// thousands of stopped workers, so callers pass DefaultListLimit unless the
+// user explicitly asked for everything.
+func (tc *TC) GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string, limit int) (WorkerList, bool, error) {
+	workers, truncated, err := paginateUpTo(limit, func(cont string) ([]tcworkermanager.WorkerFullDefinition, string, error) {
 		resp, err := tc.wm.ListWorkersForWorkerPool(workerPoolID, cont, launchConfigID, PageSize, state)
 		if err != nil {
 			return nil, "", err
@@ -334,10 +345,10 @@ func (tc *TC) GetWorkersForWorkerPool(workerPoolID, launchConfigID, state string
 		return resp.Workers, resp.ContinuationToken, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return WorkerList(workers), nil
+	return WorkerList(workers), truncated, nil
 }
 
 // GetWorkerPoolStateCounts returns worker counts by state for one pool. With
@@ -472,8 +483,10 @@ func (tc *TC) GetTaskGroup(taskGroupID string) (*tcqueue.TaskGroupDefinitionResp
 	return tc.queue.GetTaskGroup(taskGroupID)
 }
 
-func (tc *TC) GetTaskGroupTasks(taskGroupID string) (TaskGroupTaskList, error) {
-	tasks, err := paginate(func(cont string) ([]tcqueue.TaskDefinitionAndStatus, string, error) {
+// GetTaskGroupTasks lists a task group's tasks, fetching at most limit rows
+// (0 = all; see paginateUpTo) — a big group can hold thousands.
+func (tc *TC) GetTaskGroupTasks(taskGroupID string, limit int) (TaskGroupTaskList, bool, error) {
+	tasks, truncated, err := paginateUpTo(limit, func(cont string) ([]tcqueue.TaskDefinitionAndStatus, string, error) {
 		resp, err := tc.queue.ListTaskGroup(taskGroupID, cont, PageSize)
 		if err != nil {
 			return nil, "", err
@@ -481,10 +494,10 @@ func (tc *TC) GetTaskGroupTasks(taskGroupID string) (TaskGroupTaskList, error) {
 		return resp.Tasks, resp.ContinuationToken, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return TaskGroupTaskList(tasks), nil
+	return TaskGroupTaskList(tasks), truncated, nil
 }
 
 // GetDependentTasks lists tasks that declare taskID as one of their
@@ -504,8 +517,10 @@ func (tc *TC) GetDependentTasks(taskID string) (TaskGroupTaskList, error) {
 	return TaskGroupTaskList(tasks), nil
 }
 
-func (tc *TC) GetPendingTasks(taskQueueID string) (PendingTaskList, error) {
-	tasks, err := paginate(func(cont string) ([]tcqueue.Var3, string, error) {
+// GetPendingTasks lists a task queue's pending backlog, fetching at most
+// limit rows (0 = all; see paginateUpTo) — a backed-up queue is unbounded.
+func (tc *TC) GetPendingTasks(taskQueueID string, limit int) (PendingTaskList, bool, error) {
+	tasks, truncated, err := paginateUpTo(limit, func(cont string) ([]tcqueue.Var3, string, error) {
 		resp, err := tc.queue.ListPendingTasks(taskQueueID, cont, PageSize)
 		if err != nil {
 			return nil, "", err
@@ -513,14 +528,16 @@ func (tc *TC) GetPendingTasks(taskQueueID string) (PendingTaskList, error) {
 		return resp.Tasks, resp.ContinuationToken, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return PendingTaskList(tasks), nil
+	return PendingTaskList(tasks), truncated, nil
 }
 
-func (tc *TC) GetClaimedTasks(taskQueueID string) (ClaimedTaskList, error) {
-	tasks, err := paginate(func(cont string) ([]tcqueue.Var4, string, error) {
+// GetClaimedTasks lists a task queue's currently-claimed tasks, fetching at
+// most limit rows (0 = all; see paginateUpTo).
+func (tc *TC) GetClaimedTasks(taskQueueID string, limit int) (ClaimedTaskList, bool, error) {
+	tasks, truncated, err := paginateUpTo(limit, func(cont string) ([]tcqueue.Var4, string, error) {
 		resp, err := tc.queue.ListClaimedTasks(taskQueueID, cont, PageSize)
 		if err != nil {
 			return nil, "", err
@@ -528,10 +545,10 @@ func (tc *TC) GetClaimedTasks(taskQueueID string) (ClaimedTaskList, error) {
 		return resp.Tasks, resp.ContinuationToken, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return ClaimedTaskList(tasks), nil
+	return ClaimedTaskList(tasks), truncated, nil
 }
 
 // GetArtifacts lists the artifacts produced by one run of a task.

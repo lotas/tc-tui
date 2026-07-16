@@ -46,6 +46,9 @@ func buildHelpText(registry *resource.Registry) string {
 	b.WriteString("  [yellow]x[white]     on a list, toggle column truncation — use Left/Right to scroll columns " +
 		"that no longer fit; on a detail view, toggle word-wrap — use Left/Right/h/l to scroll horizontally " +
 		"once it's off\n")
+	b.WriteString("  [yellow]L[white]     load ALL rows of a truncated list — very large lists (big task groups, " +
+		"stopped workers, deep task queues) fetch only their first ~1000 rows up front, shown as [yellow][N+][white] " +
+		"in the title\n")
 	b.WriteString("  [yellow]o[white]     open the current view in Taskcluster's web UI, if that resource has one\n")
 	b.WriteString("  [yellow]s[white]     save the current view's content to a local file, if that resource supports it (e.g. an artifact)\n")
 	b.WriteString("  [yellow]Esc[white]   go back\n")

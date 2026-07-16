@@ -278,6 +278,37 @@ func (s *Shell) toggleExpandColumns() {
 	s.refreshTable()
 }
 
+// canLoadAllRows reports whether the 'L' key applies right now: a list view
+// is front and its rows were capped at the safe fetch limit with more left
+// server-side.
+func (s *Shell) canLoadAllRows() bool {
+	name, _ := s.content.GetFrontPage()
+	return name == pageTable && s.currentListTruncated
+}
+
+// loadAllRows re-fetches the current list without the safe fetch limit —
+// the 'L' key's action on a truncated list. The choice is remembered per
+// cache key (see Shell.loadAllKeys) so auto-refresh ticks and
+// back-navigation keep the full row set rather than reverting to the capped
+// first fetch.
+func (s *Shell) loadAllRows() {
+	top, ok := s.stack.Top()
+	if !ok || top.Kind != ListKind {
+		return
+	}
+	res, ok := s.registry.Resolve(top.ResourceName)
+	if !ok {
+		return
+	}
+	if _, ok := res.(resource.PartialLister); !ok {
+		return
+	}
+
+	s.loadAllKeys[cacheKeyFor(res, top.Scope, s.currentFacetValue)] = true
+	s.setTitle("Loading all " + res.Name() + "...")
+	s.loadList(res, top.Scope, s.currentFacetValue, true, true, false)
+}
+
 // toggleDetailWrap flips whether the detail body word-wraps to fit the view
 // (default) or runs lines out unbroken — the 'x' key's behavior on a detail
 // page. Unbroken lines are reachable with Left/Right/h/l, tview.TextView's
@@ -314,6 +345,11 @@ func (s *Shell) refreshTable() {
 	}
 	if s.filterQuery != "" {
 		title += " (" + s.filterQuery + ")"
+	}
+	if s.currentListTruncated {
+		// The fetch stopped at the safe limit with more rows left
+		// server-side — 'L' (see loadAllRows) fetches the rest.
+		title += fmt.Sprintf(" [%d+]", len(s.lastRows))
 	}
 	if s.augmentTotal > 0 && s.augmentCompleted < s.augmentTotal {
 		title += fmt.Sprintf(" [%d/%d]", s.augmentCompleted, s.augmentTotal)
@@ -416,6 +452,7 @@ func (s *Shell) renderList(res resource.Resource, scope string, isRestore bool) 
 	// Augment — e.g. WorkerPoolsResource.Augment unconditionally indexes
 	// Cells[4..6], which panics on a row with fewer columns than that.
 	s.lastRows = nil
+	s.currentListTruncated = false
 	s.augmentedRowIDs = map[string]bool{}
 	s.settledRowIDs = map[string]bool{}
 	s.visibleRowIDs.Store(map[string]bool{})
@@ -477,8 +514,11 @@ func (s *Shell) restoreFacetValue(sf resource.ServerFaceted, name string) string
 // rather than either blindly re-requesting rows already done or wrongly
 // treating still-unaugmented ones (e.g. hidden by a filter, or simply
 // still in flight, at the time they were cached) as settled forever.
-func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, counts map[string]int, subtitle string, settledIDs map[string]bool) {
+// truncated marks rows as capped at the safe fetch limit (see
+// resource.PartialLister) — always false for a resource that isn't one.
+func (s *Shell) applyListResult(res resource.Resource, rows []resource.Row, counts map[string]int, subtitle string, settledIDs map[string]bool, truncated bool) {
 	s.lastRows = rows
+	s.currentListTruncated = truncated
 	s.currentScopeSubtitle = subtitle
 	s.augmentCompleted, s.augmentTotal = 0, 0
 	s.augmentEpoch++
@@ -536,6 +576,9 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 	gen := s.nextLoadGeneration(isInitial)
 
 	key := cacheKeyFor(res, scope, facetValue)
+	// Whether the user has asked this view for the full uncapped fetch ('L')
+	// — read here, on the UI thread, and captured by the fetch goroutine.
+	loadAll := s.loadAllKeys[key]
 
 	recordVisit := func() {
 		if isInitial && !isRestore && scope != "" && res.Name() != "history" && s.historyRecorder != nil {
@@ -549,13 +592,17 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 	}
 
 	if !forceRefresh {
-		if entry, ok := s.cache.get(key, res.RefreshInterval()); ok {
+		// A capped snapshot can't satisfy a load once the user has asked for
+		// everything — without this, navigating away and back within the TTL
+		// after pressing 'L' (but before the uncapped fetch landed) would pin
+		// the view to the truncated rows.
+		if entry, ok := s.cache.get(key, res.RefreshInterval()); ok && !(loadAll && entry.truncated) {
 			// entry.settledIDs restores exactly which rows this cached
 			// snapshot had actually FINISHED augmenting — anything else
 			// (e.g. hidden by a narrower filter at cache time, or simply
 			// still in flight when it was cached) still gets picked up
 			// fresh below, via refreshTable.
-			s.applyListResult(res, entry.rows, entry.counts, entry.subtitle, entry.settledIDs)
+			s.applyListResult(res, entry.rows, entry.counts, entry.subtitle, entry.settledIDs, entry.truncated)
 			recordVisit() // <-- new
 			return
 		}
@@ -566,21 +613,34 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 		var counts map[string]int
 		var err error
 		var subtitle string
+		var truncated bool
 
-		if sf, ok := res.(resource.ServerFaceted); ok {
+		// A PartialLister takes precedence over every other fetch shape —
+		// it's the same list, just capped at the safe limit unless the user
+		// asked for everything. A ServerFaceted resource's FacetCounts is
+		// still fetched either way, since the tab bar needs it regardless of
+		// how the rows themselves were obtained.
+		pl, isPartial := res.(resource.PartialLister)
+		sf, isServerFaceted := res.(resource.ServerFaceted)
+
+		switch {
+		case isPartial:
+			rows, truncated, err = pl.ListPartial(scope, facetValue, loadAll)
+		case isServerFaceted:
 			rows, err = sf.FacetList(scope, facetValue)
-			if err == nil {
-				counts, err = sf.FacetCounts(scope)
-			}
-		} else if scope != "" {
+		case scope != "":
 			scoped, ok := res.(resource.ScopedResource)
 			if !ok {
 				err = fmt.Errorf("%s does not support a scoped list", res.Name())
 			} else {
 				rows, err = scoped.ScopedList(scope)
 			}
-		} else {
+		default:
 			rows, err = res.List()
+		}
+
+		if isServerFaceted && err == nil {
+			counts, err = sf.FacetCounts(scope)
 		}
 
 		// A ScopeSubtitle failure is non-fatal — sealed/expiry-style context
@@ -620,9 +680,9 @@ func (s *Shell) loadList(res resource.Resource, scope, facetValue string, isInit
 				return
 			}
 
-			s.cache.set(key, cacheEntry{rows: rows, counts: counts, subtitle: subtitle, fetchedAt: time.Now()})
-			s.applyListResult(res, rows, counts, subtitle, nil) // bumps s.augmentEpoch, resets s.augmentedRowIDs
-			recordVisit() // <-- new
+			s.cache.set(key, cacheEntry{rows: rows, counts: counts, subtitle: subtitle, fetchedAt: time.Now(), truncated: truncated})
+			s.applyListResult(res, rows, counts, subtitle, nil, truncated) // bumps s.augmentEpoch, resets s.augmentedRowIDs
+			recordVisit()                                                  // <-- new
 			// refreshTable (called by applyListResult) already triggers
 			// Augment for whatever's visible now — see
 			// triggerAugmentForNewlyVisibleRows.
@@ -867,6 +927,7 @@ func (s *Shell) triggerAugmentForNewlyVisibleRows(visible []resource.Row) {
 				s.refreshTable() // may itself mark further rows augmented — snapshot afterward
 				s.cache.set(key, cacheEntry{
 					rows: merged, counts: counts, subtitle: subtitle, fetchedAt: time.Now(),
+					truncated: s.currentListTruncated,
 					// s.settledRowIDs, not s.augmentedRowIDs: refreshTable
 					// just above may have dispatched a brand new batch
 					// (newly-visible rows, or the augmented-column-filter

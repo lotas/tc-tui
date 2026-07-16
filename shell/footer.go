@@ -57,6 +57,9 @@ func (s *Shell) renderHeaderHints() {
 	if top, ok := s.stack.Top(); !ok || top.Kind == ListKind {
 		hints = append(hints, hint{"/ filter", "[yellow]/[white] filter"})
 		hints = append(hints, hint{"x truncate", "[yellow]x[white] truncate"})
+		if s.currentListTruncated {
+			hints = append(hints, hint{"L load all", "[yellow]L[white] load all"})
+		}
 	} else if top.Kind == DetailKind {
 		hints = append(hints, hint{"x wrap", "[yellow]x[white] wrap"})
 	}
