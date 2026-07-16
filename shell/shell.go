@@ -160,6 +160,13 @@ type Shell struct {
 
 	stopRefresh chan struct{}
 
+	// stopStream, when non-nil, is the active detail stream's stop channel
+	// (see runDetailStream) — closed by stopDetailStream whenever the
+	// streamed view stops being the one on screen (navigation, error, a
+	// newer load), which ends the underlying fetch. Like stopRefresh, only
+	// ever touched on the UI goroutine.
+	stopStream chan struct{}
+
 	cache *listCache
 
 	// historyRecorder is resolved once, in init(), from whatever resource is

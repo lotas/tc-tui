@@ -162,6 +162,61 @@ func (r *TaskArtifactsResource) Describe(id string) (Detail, error) {
 	}, nil
 }
 
+// IsLive reports whether id is a still-streaming live log: the artifact
+// named "public/logs/live.log" of a run that's currently running. Once the
+// run resolves, that same artifact name just redirects to the static backing
+// log, and every other artifact is static from the start — those all take
+// the ordinary one-shot Describe path. A malformed id or a failed status
+// fetch also reports false (see LiveStreamer's contract): the one-shot path
+// will surface the same problem as a normal error.
+func (r *TaskArtifactsResource) IsLive(id string) bool {
+	taskID, runID, name, err := parseArtifactID(id)
+	if err != nil || name != liveLogArtifactName {
+		return false
+	}
+
+	status, err := r.tc.GetTaskStatus(taskID)
+	if err != nil {
+		return false
+	}
+
+	for _, run := range status.Runs {
+		if run.RunID == runID {
+			return run.State == "running"
+		}
+	}
+	return false
+}
+
+// StreamDetail streams a live log's content — see LiveStreamer. Chunks are
+// reassembled into whole lines (see lineAssembler) before going through the
+// same escaping pipeline renderArtifactText uses, so a chunk boundary can
+// never corrupt an ANSI code or a tview-escaped bracket; the unterminated
+// final line is flushed once the stream ends.
+func (r *TaskArtifactsResource) StreamDetail(id string, stop <-chan struct{}, onStart func(Detail), onAppend func(text string)) (bool, error) {
+	taskID, runID, name, err := parseArtifactID(id)
+	if err != nil {
+		return false, err
+	}
+
+	onStart(Detail{Title: fmt.Sprintf("Task :: %s :: Run %d :: %s", taskID, runID, name)})
+
+	var assembler lineAssembler
+	emit := func(text string) {
+		if text == "" {
+			return
+		}
+		onAppend(tview.TranslateANSI(escapeIgnoringANSI(text)))
+	}
+
+	_, truncated, err := r.tc.StreamArtifactContent(taskID, runID, name, stop, func(chunk []byte) {
+		emit(assembler.Feed(chunk))
+	})
+	emit(assembler.Flush())
+
+	return truncated, err
+}
+
 func (r *TaskArtifactsResource) RefreshInterval() time.Duration { return 0 }
 
 // ListWebURL links to the scoped task's own page — there's no dedicated

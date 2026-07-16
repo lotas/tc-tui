@@ -80,6 +80,7 @@ type Taskcluster interface {
 	GetClaimedTasks(taskQueueID string, limit int) (ClaimedTaskList, bool, error)
 	GetArtifacts(taskID string, runID int64) (ArtifactList, error)
 	GetArtifactContent(taskID string, runID int64, name string) (content string, contentType string, truncated bool, err error)
+	StreamArtifactContent(taskID string, runID int64, name string, stop <-chan struct{}, onChunk func(chunk []byte)) (contentType string, truncated bool, err error)
 	GetArtifactURL(taskID string, runID int64, name string) (string, error)
 
 	GetClients() (ClientList, error)

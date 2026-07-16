@@ -1,10 +1,19 @@
 package shell
 
 import (
+	"fmt"
+
 	"github.com/rivo/tview"
 
 	"github.com/taskcluster/tc-tui/resource"
 )
+
+// streamViewMaxLines bounds the TextView's buffer while a live stream is
+// appending to it (see StartStream) — a long-running task's log grows
+// without limit, and unlike a one-shot render there's no
+// maxArtifactRenderBytes gate in front of the view. Oldest lines are
+// dropped; 'o'/'s' remain the full-content escape hatches.
+const streamViewMaxLines = 10000
 
 // DetailView renders a Resource.Describe(id) result. Any DetailActions the
 // Detail carries are dispatched by Shell.globalInputCapture (shared with a
@@ -42,6 +51,7 @@ func (d *DetailView) SetWrapEnabled(enabled bool) {
 }
 
 func (d *DetailView) SetData(detail resource.Detail) {
+	d.SetMaxLines(0) // clear any StartStream bound — one-shot bodies are pre-capped
 	d.Clear().SetText(detail.Body).ScrollToBeginning()
 }
 
@@ -51,6 +61,25 @@ func (d *DetailView) SetData(detail resource.Detail) {
 // manual `r` key doesn't yank the reader back to the top.
 func (d *DetailView) UpdateData(detail resource.Detail) {
 	row, col := d.GetScrollOffset()
+	d.SetMaxLines(0)
 	d.Clear().SetText(detail.Body)
 	d.ScrollTo(row, col)
+}
+
+// StartStream prepares the view for a live stream: empty content, a line
+// bound on the buffer, and follow mode — tview's ScrollToEnd keeps the view
+// pinned to the newest line as content is appended, detaching when the user
+// scrolls up and re-attaching when they return to the bottom, i.e. `tail -f`
+// semantics for free.
+func (d *DetailView) StartStream() {
+	d.Clear()
+	d.SetMaxLines(streamViewMaxLines)
+	d.ScrollToEnd()
+}
+
+// AppendStream appends already-rendered text to the view without touching
+// the scroll state — follow/detached behavior stays wherever StartStream and
+// the user's own scrolling left it.
+func (d *DetailView) AppendStream(text string) {
+	fmt.Fprint(d.TextView, text)
 }

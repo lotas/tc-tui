@@ -313,12 +313,17 @@ func renderRunBody(tc taskcluster.Taskcluster, taskID string, run tcqueue.RunInf
 	return b.String()
 }
 
+// liveLogArtifactName is the streamed copy of a run's output, served only
+// while that run is still executing — the one artifact worth streaming
+// rather than fetching once (see TaskArtifactsResource.IsLive).
+const liveLogArtifactName = "public/logs/live.log"
+
 // liveLogArtifactNames are the artifact names checked, in preference order,
 // when jumping straight to a run's live log via the 'l' action: "live.log"
 // is the streamed copy served only while a run is still executing; once it
 // resolves, workers keep only "live_backing.log", their plain backing copy
 // of the same output.
-var liveLogArtifactNames = []string{"public/logs/live.log", "public/logs/live_backing.log"}
+var liveLogArtifactNames = []string{liveLogArtifactName, "public/logs/live_backing.log"}
 
 // findLiveLogArtifact looks for a live-log-shaped artifact among runID's own
 // artifacts, returning the first name found (checked in

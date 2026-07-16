@@ -113,6 +113,11 @@ type fakeTaskcluster struct {
 	artifactURL    string
 	artifactURLErr error
 
+	streamChunks      [][]byte
+	streamContentType string
+	streamTruncated   bool
+	streamErr         error
+
 	clients    taskcluster.ClientList
 	clientsErr error
 	client     *tcauth.GetClientResponse
@@ -255,6 +260,19 @@ func (f *fakeTaskcluster) GetArtifacts(taskID string, runID int64) (taskcluster.
 
 func (f *fakeTaskcluster) GetArtifactContent(taskID string, runID int64, name string) (string, string, bool, error) {
 	return f.artifactContent, f.artifactContentType, f.artifactTruncated, f.artifactContentErr
+}
+
+// StreamArtifactContent delivers f.streamChunks one onChunk call each, then
+// returns — synchronously, so tests need no coordination. stop is ignored;
+// tests exercising interruption drive it at the shell layer instead.
+func (f *fakeTaskcluster) StreamArtifactContent(taskID string, runID int64, name string, stop <-chan struct{}, onChunk func(chunk []byte)) (string, bool, error) {
+	if f.streamErr != nil {
+		return "", false, f.streamErr
+	}
+	for _, chunk := range f.streamChunks {
+		onChunk(chunk)
+	}
+	return f.streamContentType, f.streamTruncated, nil
 }
 
 func (f *fakeTaskcluster) GetArtifactURL(taskID string, runID int64, name string) (string, error) {

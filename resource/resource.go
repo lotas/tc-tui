@@ -231,6 +231,30 @@ type Augmentable interface {
 	Augment(rows []Row, wanted func(id string) bool, onUpdate func(rows []Row, completed, total int))
 }
 
+// LiveStreamer is implemented by a Resource for which some ids' Detail
+// content is a live stream to be appended to progressively (e.g. a running
+// task's live log), rather than fetched once via Describe. The shell asks
+// IsLive per id at detail-load time — off the UI thread, since it may cost
+// an API call — and takes the streaming path only when it reports true;
+// every other id keeps the ordinary Describe flow.
+type LiveStreamer interface {
+	Resource
+	// IsLive reports whether id's content is currently live. It must err
+	// on the side of false — a false negative just means the one-shot
+	// Describe path, where any real problem surfaces as a normal error.
+	IsLive(id string) bool
+	// StreamDetail streams id's content: onStart is called exactly once,
+	// before any content, with the Detail scaffold (title; Body empty) to
+	// render immediately; onAppend is then called with ready-to-render
+	// text (escaped and ANSI-translated, whole lines) as new content
+	// arrives. It blocks until the stream ends — the server closed it,
+	// the total size cap was hit (reported via truncated), or stop was
+	// closed (a clean interruption, returning nil error). Both callbacks
+	// are invoked from StreamDetail's own goroutine — the caller handles
+	// any synchronization with the UI thread.
+	StreamDetail(id string, stop <-chan struct{}, onStart func(Detail), onAppend func(text string)) (truncated bool, err error)
+}
+
 // WebLinkable is implemented by resources that have a corresponding page in
 // Taskcluster's web UI (a different app sharing the same root URL), letting
 // the shell open that page in a browser. DetailWebURL builds the link for a

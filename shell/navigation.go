@@ -988,6 +988,13 @@ func (s *Shell) loadDetail(res resource.Resource, id string, isInitial, isRestor
 	gen := s.nextLoadGeneration(isInitial)
 
 	go func() {
+		// A currently-live id streams instead of Describe-ing — checked
+		// here, off the UI thread, since IsLive may cost an API call.
+		if ls, ok := res.(resource.LiveStreamer); ok && ls.IsLive(id) {
+			s.runDetailStream(ls, id, gen, isInitial, isRestore)
+			return
+		}
+
 		detail, err := res.Describe(id)
 		s.app.QueueUpdateDraw(func() {
 			if s.isStaleLoad(gen) {

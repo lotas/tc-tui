@@ -84,8 +84,21 @@ func (s *Shell) startRefreshLoop(view View, interval time.Duration) {
 }
 
 func (s *Shell) stopRefreshLoop() {
+	s.stopDetailStream()
+
 	if s.stopRefresh != nil {
 		close(s.stopRefresh)
 		s.stopRefresh = nil
+	}
+}
+
+// stopDetailStream ends any in-flight detail stream (see runDetailStream).
+// Folded into stopRefreshLoop — which every navigation, error view, and new
+// refresh loop already goes through — so a live stream can never outlive the
+// view it was rendering into.
+func (s *Shell) stopDetailStream() {
+	if s.stopStream != nil {
+		close(s.stopStream)
+		s.stopStream = nil
 	}
 }
