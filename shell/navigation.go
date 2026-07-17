@@ -41,7 +41,7 @@ func (s *Shell) switchResource(nameOrAlias, scope string) {
 	// switchToDetail (Describe) instead of a scoped List view.
 	if dsr, isDirectScoped := res.(resource.DirectScopedResource); isDirectScoped {
 		if scope == "" {
-			s.openIDPrompt(dsr.IDPromptLabel(), func(id string) {
+			s.openIDPrompt(dsr.IDPromptLabel(), historyKeyIDPrompt, func(id string) {
 				s.switchResource(dsr.Name(), id)
 			})
 			return
@@ -53,7 +53,7 @@ func (s *Shell) switchResource(nameOrAlias, scope string) {
 
 	if direct, isDirect := res.(resource.DirectLookup); isDirect {
 		if scope == "" {
-			s.openIDPrompt(direct.IDPromptLabel(), func(id string) {
+			s.openIDPrompt(direct.IDPromptLabel(), historyKeyIDPrompt, func(id string) {
 				s.switchToDetail(res, id)
 			})
 			return
@@ -318,6 +318,14 @@ func (s *Shell) toggleDetailWrap() {
 	s.refreshDetailTitle()
 }
 
+// toggleDetailLineNumbers flips the 'n' key's vim-like "set number" gutter on
+// a detail body — most useful paired with a '/' filter, so a line's original
+// position stays visible even once the query has hidden the lines around it.
+func (s *Shell) toggleDetailLineNumbers() {
+	s.detail.SetLineNumbersEnabled(!s.detail.LineNumbersEnabled())
+	s.refreshDetailTitle()
+}
+
 // refreshDetailTitle rebuilds the detail page's title from
 // currentDetailTitle, appending a "[no wrap]" suffix while word-wrap is
 // toggled off — the detail-page counterpart of refreshTable's "[no
@@ -327,6 +335,9 @@ func (s *Shell) refreshDetailTitle() {
 	title := s.currentDetailTitle
 	if !s.detail.WrapEnabled() {
 		title += " [no wrap]"
+	}
+	if s.detail.LineNumbersEnabled() {
+		title += " [#]"
 	}
 	if query := s.detail.FilterQuery(); query != "" {
 		title += " (" + query + ")"

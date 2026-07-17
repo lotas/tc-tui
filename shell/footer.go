@@ -63,6 +63,7 @@ func (s *Shell) renderHeaderHints() {
 	} else if top.Kind == DetailKind {
 		hints = append(hints, hint{"/ filter", "[yellow]/[white] filter"})
 		hints = append(hints, hint{"x wrap", "[yellow]x[white] wrap"})
+		hints = append(hints, hint{"n line numbers", "[yellow]n[white] line numbers"})
 	}
 	if s.hasFacets() {
 		hints = append(hints, hint{"Tab/Shift+Tab switch state", "[yellow]Tab[white]/[yellow]Shift+Tab[white] switch state"})
@@ -157,6 +158,8 @@ func (s *Shell) renderBreadcrumbs() {
 
 func (s *Shell) openCommandBar() {
 	s.footerMode = footerCommand
+	s.footerHistoryKey = historyKeyCommand
+	s.resetFooterHistoryNav()
 	s.footerInput.SetLabel("[yellow]:[white] ").SetText("")
 	s.footer.SwitchToPage(pageFooterInput)
 	s.app.SetFocus(s.footerInput)
@@ -164,6 +167,8 @@ func (s *Shell) openCommandBar() {
 
 func (s *Shell) openFilter() {
 	s.footerMode = footerFilter
+	s.footerHistoryKey = historyKeyFilter
+	s.resetFooterHistoryNav()
 	query := s.filterQuery
 	if name, _ := s.content.GetFrontPage(); name == pageDetail {
 		query = s.detail.FilterQuery()
@@ -175,11 +180,17 @@ func (s *Shell) openFilter() {
 
 // openIDPrompt switches the footer to an inline id-entry field for a
 // DirectLookup or DirectScopedResource reached with no id (e.g. bare
-// `:task`), rather than erroring or redirecting — there's no browsable list
-// to redirect to. commit is called with the entered id once Enter is
-// pressed; label is what's shown before the input field, e.g. "task id".
-func (s *Shell) openIDPrompt(label string, commit func(id string)) {
+// `:task`), or for the 's' save-as path — rather than erroring or
+// redirecting, since there's no browsable list to redirect to. commit is
+// called with the entered text once Enter is pressed; label is what's shown
+// before the input field, e.g. "task id" or "save as". historyKey scopes
+// Up/Down recall to the right bucket — callers must pass a distinct key per
+// semantically different prompt (id lookup vs. save path) so one never
+// pollutes the other's history.
+func (s *Shell) openIDPrompt(label string, historyKey footerHistoryKey, commit func(id string)) {
 	s.footerMode = footerPrompt
+	s.footerHistoryKey = historyKey
+	s.resetFooterHistoryNav()
 	s.pendingLookupCommit = commit
 	s.footerInput.SetLabel(fmt.Sprintf("[yellow]%s:[white] ", label)).SetText("")
 	s.footer.SwitchToPage(pageFooterInput)
@@ -190,6 +201,63 @@ func (s *Shell) closeFooterInput() {
 	s.footerMode = footerIdle
 	s.footer.SwitchToPage(pageFooterBreadcrumb)
 	s.app.SetFocus(s.activeContent)
+}
+
+// resetFooterHistoryNav points the history cursor at "newest" for whichever
+// bucket the footer was just opened in, so a fresh Up press always recalls
+// the most recent entry rather than resuming wherever a previous session's
+// browsing left off.
+func (s *Shell) resetFooterHistoryNav() {
+	s.footerHistoryIndex = len(s.footerHistory[s.footerHistoryKey])
+	s.footerHistoryDraft = ""
+}
+
+// recordFooterHistory appends text to key's history, skipping a blank entry
+// or one identical to the immediately preceding entry (so repeatedly
+// re-running the same command doesn't pad the history with duplicates).
+func (s *Shell) recordFooterHistory(key footerHistoryKey, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	history := s.footerHistory[key]
+	if len(history) > 0 && history[len(history)-1] == text {
+		return
+	}
+	s.footerHistory[key] = append(history, text)
+}
+
+// cycleFooterHistory moves the history cursor by delta (-1 for Up/older, +1
+// for Down/newer) and writes the resulting entry into the footer input.
+// Moving up for the first time in a browsing session stashes whatever was
+// already typed as the draft, restored once Down cycles back past the
+// newest entry. Both directions are no-ops at their respective ends (oldest
+// entry stays put on Up; nothing to do on Down with no history browsed).
+func (s *Shell) cycleFooterHistory(delta int) {
+	history := s.footerHistory[s.footerHistoryKey]
+	if len(history) == 0 {
+		return
+	}
+
+	if delta < 0 {
+		if s.footerHistoryIndex == len(history) {
+			s.footerHistoryDraft = s.footerInput.GetText()
+		}
+		if s.footerHistoryIndex > 0 {
+			s.footerHistoryIndex--
+		}
+	} else {
+		if s.footerHistoryIndex >= len(history) {
+			return // already at the draft; nothing newer to cycle to
+		}
+		s.footerHistoryIndex++
+	}
+
+	if s.footerHistoryIndex >= len(history) {
+		s.footerInput.SetText(s.footerHistoryDraft)
+		return
+	}
+	s.footerInput.SetText(history[s.footerHistoryIndex])
 }
 
 func (s *Shell) handleFooterInputChanged(text string) {
@@ -213,6 +281,7 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 	case tcell.KeyEnter:
 		switch s.footerMode {
 		case footerCommand:
+			s.recordFooterHistory(s.footerHistoryKey, s.footerInput.GetText())
 			name, scope := splitCommand(s.footerInput.GetText())
 			s.closeFooterInput()
 			if strings.EqualFold(name, "help") {
@@ -221,6 +290,7 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 				s.switchResource(name, scope)
 			}
 		case footerFilter:
+			s.recordFooterHistory(s.footerHistoryKey, s.footerInput.GetText())
 			// The detail-page filter is already applied live by
 			// handleFooterInputChanged and isn't resource-scoped the way a
 			// list filter is — Enter there just leaves the input.
@@ -234,6 +304,7 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 			if id == "" {
 				return // keep the prompt open; nothing to look up yet
 			}
+			s.recordFooterHistory(s.footerHistoryKey, id)
 			commit := s.pendingLookupCommit
 			s.pendingLookupCommit = nil
 			s.closeFooterInput()

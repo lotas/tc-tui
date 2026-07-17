@@ -29,6 +29,21 @@ const (
 	footerPrompt
 )
 
+// footerHistoryKey names a footer history bucket (see Shell.footerHistory).
+// It's tracked separately from footerMode because footerMode's footerPrompt
+// value covers two semantically unrelated prompts — a resource-id lookup
+// (`:task`, `:hook`, ...) and the 's' save-as path — that must never share
+// recall history (a task id showing up while typing a save path, or vice
+// versa, would be actively confusing).
+type footerHistoryKey string
+
+const (
+	historyKeyCommand  footerHistoryKey = "command"
+	historyKeyFilter   footerHistoryKey = "filter"
+	historyKeyIDPrompt footerHistoryKey = "id-prompt"
+	historyKeySavePath footerHistoryKey = "save-path"
+)
+
 // Shell is the generic navigation engine: registry, view stack, table/detail
 // views, command bar, filter, refresh loop. It knows nothing about roles or
 // worker pools specifically — only the Resource interface.
@@ -55,6 +70,19 @@ type Shell struct {
 	footerInput         *tview.InputField
 	footerMode          footerMode
 	pendingLookupCommit func(id string) // set while footerMode == footerPrompt; called with the entered id
+
+	// footerHistory remembers previously entered footer text, scoped per
+	// footerHistoryKey (command bar, filter, id lookup, and save-as path each
+	// get their own history) so Up/Down can recall it shell-style.
+	// footerHistoryKey is which bucket is currently active, set by whichever
+	// open* function opened the footer. footerHistoryIndex is a cursor into
+	// that bucket's slice — len(history) means "not browsing", i.e. showing
+	// footerHistoryDraft, the text that was being typed before the first Up
+	// press of the current browsing session.
+	footerHistory      map[footerHistoryKey][]string
+	footerHistoryKey   footerHistoryKey
+	footerHistoryIndex int
+	footerHistoryDraft string
 
 	currentListResource  string
 	currentListScope     string // "" for an unscoped list
@@ -224,6 +252,7 @@ func New(registry *resource.Registry) *Shell {
 		facetByResource:  make(map[string]string),
 		filterByResource: make(map[string]string),
 		loadAllKeys:      make(map[cacheKey]bool),
+		footerHistory:    make(map[footerHistoryKey][]string),
 		cache:            newListCache(),
 		openBrowser:      openBrowser,
 	}
@@ -290,9 +319,10 @@ func (s *Shell) init() {
 // `/` opens the filter (narrows a list's rows, or a detail body's lines,
 // including a live-streaming one), `?` toggles the help overlay, and Esc
 // pops the view stack (a no-op at the root, or closes help if open).
-// While the footer input is active, every key passes through untouched so it
-// can be typed into the input field. While help is open, every key is
-// swallowed except q, Esc/`?`, and the scroll keys.
+// While the footer input is active, Up/Down cycle that mode's footer
+// history (see cycleFooterHistory) and every other key passes through
+// untouched so it can be typed into the input field. While help is open,
+// every key is swallowed except q, Esc/`?`, and the scroll keys.
 func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	if s.helpOpen {
 		if s.footerMode == footerIdle && isQuitKey(event) {
@@ -319,6 +349,14 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	}
 
 	if s.footerMode != footerIdle {
+		switch event.Key() {
+		case tcell.KeyUp:
+			s.cycleFooterHistory(-1)
+			return nil
+		case tcell.KeyDown:
+			s.cycleFooterHistory(1)
+			return nil
+		}
 		return event
 	}
 
@@ -372,6 +410,15 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		case pageDetail:
 			s.toggleDetailWrap()
 		}
+		return nil
+	// 'n' only means something on a detail page — falling through to the
+	// detail-action keys below (rather than swallowing the key) elsewhere,
+	// same reasoning as the 'L' condition just below.
+	case event.Rune() == 'n':
+		if name, _ := s.content.GetFrontPage(); name != pageDetail {
+			break
+		}
+		s.toggleDetailLineNumbers()
 		return nil
 	// The condition is part of the case so that an 'L' pressed anywhere a
 	// truncated list ISN'T front falls through to the detail-action keys

@@ -47,6 +47,8 @@ func buildHelpText(registry *resource.Registry) string {
 	b.WriteString("  [yellow]x[white]     on a list, toggle column truncation — use Left/Right to scroll columns " +
 		"that no longer fit; on a detail view, toggle word-wrap — use Left/Right/h/l to scroll horizontally " +
 		"once it's off\n")
+	b.WriteString("  [yellow]n[white]     on a detail view, toggle a vim-like line-number gutter — a filtered line keeps " +
+		"its original number, so you can still tell where it sat among the lines the query hid\n")
 	b.WriteString("  [yellow]L[white]     load ALL rows of a truncated list — very large lists (big task groups, " +
 		"stopped workers, deep task queues) fetch only their first ~1000 rows up front, shown as [yellow][N+][white] " +
 		"in the title\n")
@@ -54,6 +56,10 @@ func buildHelpText(registry *resource.Registry) string {
 	b.WriteString("  [yellow]s[white]     save the current view's content to a local file, if that resource supports it (e.g. an artifact)\n")
 	b.WriteString("  [yellow]Esc[white]   go back\n")
 	b.WriteString("  [yellow]?[white]     toggle this help screen\n\n")
+
+	b.WriteString("[green]Footer input (command bar, filter, id prompt)[white]\n\n")
+	b.WriteString("  [yellow]Up[white]/[yellow]Down[white]  cycle through previously entered values, scoped separately per input " +
+		"kind (command bar vs. filter vs. id prompt)\n\n")
 
 	b.WriteString("[green]Resources[white]\n\n")
 	for _, name := range registry.Names() {

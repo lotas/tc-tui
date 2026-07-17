@@ -67,7 +67,7 @@ func (s *Shell) promptSaveToDisk() {
 		return
 	}
 
-	s.openIDPrompt("save as", func(path string) {
+	s.openIDPrompt("save as", historyKeySavePath, func(path string) {
 		s.saveToDisk(d, id, path)
 	})
 	s.footerInput.SetText(filename)

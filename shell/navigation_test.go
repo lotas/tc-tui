@@ -1387,6 +1387,59 @@ func TestGlobalInputCaptureXKeyIsNoOpOffTablePage(t *testing.T) {
 	}
 }
 
+func TestToggleDetailLineNumbersFlipsDetailStateAndShowsInTitle(t *testing.T) {
+	s := newTestShellForSort()
+	s.currentDetailTitle = "widget:1"
+	s.refreshDetailTitle()
+
+	if s.detail.LineNumbersEnabled() {
+		t.Fatalf("expected line numbers disabled by default")
+	}
+
+	s.toggleDetailLineNumbers()
+
+	if !s.detail.LineNumbersEnabled() {
+		t.Fatalf("expected first toggle to enable line numbers")
+	}
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: widget:1 [#] ]"; got != want {
+		t.Fatalf("title after toggling = %q, want %q", got, want)
+	}
+
+	s.toggleDetailLineNumbers()
+
+	if s.detail.LineNumbersEnabled() {
+		t.Fatalf("expected second toggle to disable line numbers")
+	}
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: widget:1 ]"; got != want {
+		t.Fatalf("title after second toggle = %q, want %q", got, want)
+	}
+}
+
+func TestGlobalInputCaptureNKeyTogglesLineNumbersOnDetailPage(t *testing.T) {
+	s := newTestShellForSort()
+	s.content.SwitchToPage(pageDetail)
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'n', tcell.ModNone)
+	if got := s.globalInputCapture(event); got != nil {
+		t.Fatalf("expected 'n' key to be swallowed, got %#v", got)
+	}
+
+	if !s.detail.LineNumbersEnabled() {
+		t.Fatalf("expected 'n' to toggle line numbers on the detail page")
+	}
+}
+
+func TestGlobalInputCaptureNKeyIsNoOpOffDetailPage(t *testing.T) {
+	s := newTestShellForSort()
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'n', tcell.ModNone)
+	s.globalInputCapture(event)
+
+	if s.detail.LineNumbersEnabled() {
+		t.Fatalf("expected 'n' to be a no-op when the detail page isn't showing")
+	}
+}
+
 func TestGlobalInputCaptureDigitTriggersSortOnTablePage(t *testing.T) {
 	s := newTestShellForSort()
 

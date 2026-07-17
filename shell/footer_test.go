@@ -370,6 +370,220 @@ func TestUpdateBorderColorTintsOnActiveDetailFilter(t *testing.T) {
 	}
 }
 
+func TestCycleFooterHistoryUpRecallsMostRecentEntry(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.footerMode = footerCommand
+	s.footerHistoryKey = historyKeyCommand
+	s.footerHistory[historyKeyCommand] = []string{"workers gcp", "workerpools"}
+	s.footerHistoryIndex = len(s.footerHistory[historyKeyCommand])
+	s.footerInput.SetText("")
+
+	s.cycleFooterHistory(-1)
+
+	if got := s.footerInput.GetText(); got != "workerpools" {
+		t.Fatalf("expected most recent history entry %q, got %q", "workerpools", got)
+	}
+}
+
+func TestCycleFooterHistoryUpTwiceRecallsOlderEntry(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.footerMode = footerCommand
+	s.footerHistoryKey = historyKeyCommand
+	s.footerHistory[historyKeyCommand] = []string{"workers gcp", "workerpools"}
+	s.footerHistoryIndex = len(s.footerHistory[historyKeyCommand])
+	s.footerInput.SetText("")
+
+	s.cycleFooterHistory(-1)
+	s.cycleFooterHistory(-1)
+
+	if got := s.footerInput.GetText(); got != "workers gcp" {
+		t.Fatalf("expected older history entry %q, got %q", "workers gcp", got)
+	}
+}
+
+func TestCycleFooterHistoryUpAtOldestEntryStaysThere(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.footerMode = footerCommand
+	s.footerHistoryKey = historyKeyCommand
+	s.footerHistory[historyKeyCommand] = []string{"workers gcp", "workerpools"}
+	s.footerHistoryIndex = len(s.footerHistory[historyKeyCommand])
+
+	s.cycleFooterHistory(-1)
+	s.cycleFooterHistory(-1)
+	s.cycleFooterHistory(-1) // one past the oldest entry — should stay put
+
+	if got := s.footerInput.GetText(); got != "workers gcp" {
+		t.Fatalf("expected to stay on the oldest entry %q, got %q", "workers gcp", got)
+	}
+}
+
+func TestCycleFooterHistoryDownRestoresDraftAfterUp(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.footerMode = footerCommand
+	s.footerHistoryKey = historyKeyCommand
+	s.footerHistory[historyKeyCommand] = []string{"workerpools"}
+	s.footerHistoryIndex = len(s.footerHistory[historyKeyCommand])
+	s.footerInput.SetText("wor")
+
+	s.cycleFooterHistory(-1)
+	if got := s.footerInput.GetText(); got != "workerpools" {
+		t.Fatalf("expected history entry recalled, got %q", got)
+	}
+
+	s.cycleFooterHistory(1)
+	if got := s.footerInput.GetText(); got != "wor" {
+		t.Fatalf("expected draft restored after cycling past newest entry, got %q", got)
+	}
+}
+
+func TestCycleFooterHistoryDownWithNoHistoryIsNoop(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.footerMode = footerCommand
+	s.footerHistoryKey = historyKeyCommand
+	s.footerInput.SetText("wor")
+
+	s.cycleFooterHistory(1)
+
+	if got := s.footerInput.GetText(); got != "wor" {
+		t.Fatalf("expected text untouched, got %q", got)
+	}
+}
+
+func TestCycleFooterHistoryScopedPerMode(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.footerHistory[historyKeyCommand] = []string{"workerpools"}
+	s.footerHistory[historyKeyFilter] = []string{"proj-task"}
+
+	s.footerMode = footerFilter
+	s.footerHistoryKey = historyKeyFilter
+	s.footerHistoryIndex = len(s.footerHistory[historyKeyFilter])
+	s.footerInput.SetText("")
+	s.cycleFooterHistory(-1)
+
+	if got := s.footerInput.GetText(); got != "proj-task" {
+		t.Fatalf("expected filter history entry, got %q", got)
+	}
+}
+
+func TestRecordFooterHistoryAppendsNonEmptyEntry(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.footerMode = footerCommand
+
+	s.recordFooterHistory(historyKeyCommand, "workerpools")
+
+	if got := s.footerHistory[historyKeyCommand]; len(got) != 1 || got[0] != "workerpools" {
+		t.Fatalf("expected history to contain %q, got %v", "workerpools", got)
+	}
+}
+
+func TestRecordFooterHistorySkipsConsecutiveDuplicate(t *testing.T) {
+	s := New(resource.NewRegistry())
+
+	s.recordFooterHistory(historyKeyCommand, "workerpools")
+	s.recordFooterHistory(historyKeyCommand, "workerpools")
+
+	if got := s.footerHistory[historyKeyCommand]; len(got) != 1 {
+		t.Fatalf("expected duplicate entry to be skipped, got %v", got)
+	}
+}
+
+func TestRecordFooterHistorySkipsEmptyEntry(t *testing.T) {
+	s := New(resource.NewRegistry())
+
+	s.recordFooterHistory(historyKeyCommand, "   ")
+
+	if got := s.footerHistory[historyKeyCommand]; len(got) != 0 {
+		t.Fatalf("expected no history entry recorded, got %v", got)
+	}
+}
+
+func TestHandleFooterInputDoneRecordsCommandHistory(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.footerMode = footerCommand
+	s.footerHistoryKey = historyKeyCommand
+	s.footerInput.SetText("workerpools")
+
+	s.handleFooterInputDone(tcell.KeyEnter)
+
+	if got := s.footerHistory[historyKeyCommand]; len(got) != 1 || got[0] != "workerpools" {
+		t.Fatalf("expected command recorded to history, got %v", got)
+	}
+}
+
+func TestOpenCommandBarResetsHistoryNavToNewest(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.footerHistory[historyKeyCommand] = []string{"workerpools"}
+	s.footerMode = footerCommand
+	s.footerHistoryKey = historyKeyCommand
+	s.footerHistoryIndex = 0 // simulate having browsed history in a prior open
+
+	s.openCommandBar()
+
+	if s.footerHistoryIndex != len(s.footerHistory[historyKeyCommand]) {
+		t.Fatalf("expected history nav reset to newest (%d), got %d", len(s.footerHistory[historyKeyCommand]), s.footerHistoryIndex)
+	}
+}
+
+func TestGlobalInputCaptureUpArrowCyclesHistoryWhenFooterActive(t *testing.T) {
+	s := newTestShellForSort()
+	s.openCommandBar()
+	s.footerHistory[historyKeyCommand] = []string{"workerpools"}
+	s.footerHistoryIndex = len(s.footerHistory[historyKeyCommand])
+
+	event := tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
+	if got := s.globalInputCapture(event); got != nil {
+		t.Fatalf("expected Up arrow to be swallowed, got %#v", got)
+	}
+
+	if got := s.footerInput.GetText(); got != "workerpools" {
+		t.Fatalf("expected history entry recalled via global input capture, got %q", got)
+	}
+}
+
+func TestOpenIDPromptScopesHistoryToIDLookupKey(t *testing.T) {
+	s := New(resource.NewRegistry())
+
+	s.openIDPrompt("task id", historyKeyIDPrompt, func(id string) {})
+
+	if s.footerHistoryKey != historyKeyIDPrompt {
+		t.Fatalf("expected footerHistoryKey %q, got %q", historyKeyIDPrompt, s.footerHistoryKey)
+	}
+}
+
+func TestFooterHistorySeparatesSavePathFromIDLookup(t *testing.T) {
+	s := New(resource.NewRegistry())
+
+	s.openIDPrompt("task id", historyKeyIDPrompt, func(id string) {})
+	s.footerInput.SetText("aBcDeF123")
+	s.handleFooterInputDone(tcell.KeyEnter)
+
+	s.openIDPrompt("save as", historyKeySavePath, func(path string) {})
+	s.footerInput.SetText("out.log")
+	s.handleFooterInputDone(tcell.KeyEnter)
+
+	if got := s.footerHistory[historyKeyIDPrompt]; len(got) != 1 || got[0] != "aBcDeF123" {
+		t.Fatalf("expected id-lookup history to contain only the task id, got %v", got)
+	}
+	if got := s.footerHistory[historyKeySavePath]; len(got) != 1 || got[0] != "out.log" {
+		t.Fatalf("expected save-path history to contain only the filename, got %v", got)
+	}
+
+	// Reopening the id-lookup prompt must recall the task id, not the
+	// filename just saved.
+	s.openIDPrompt("task id", historyKeyIDPrompt, func(id string) {})
+	s.cycleFooterHistory(-1)
+	if got := s.footerInput.GetText(); got != "aBcDeF123" {
+		t.Fatalf("expected id-lookup history recall %q, got %q", "aBcDeF123", got)
+	}
+
+	// And reopening save-as must recall the filename, not the task id.
+	s.openIDPrompt("save as", historyKeySavePath, func(path string) {})
+	s.cycleFooterHistory(-1)
+	if got := s.footerInput.GetText(); got != "out.log" {
+		t.Fatalf("expected save-path history recall %q, got %q", "out.log", got)
+	}
+}
+
 func TestRefreshDetailTitleAppendsFilterSuffix(t *testing.T) {
 	s := New(resource.NewRegistry())
 	s.detail.SetData(resource.Detail{Body: "alpha\nbeta\n"})
