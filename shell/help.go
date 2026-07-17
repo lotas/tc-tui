@@ -37,7 +37,8 @@ func buildHelpText(registry *resource.Registry) string {
 	b.WriteString("[green]Global keys[white]\n\n")
 	b.WriteString("  [yellow]q[white]     quit from any view\n")
 	b.WriteString("  [yellow]:[white]     open the command bar (switch resource, e.g. `:workerpools`, `:wp`, `:workers <poolId>`, `:help`)\n")
-	b.WriteString("  [yellow]/[white]     filter the current list (list views only)\n")
+	b.WriteString("  [yellow]/[white]     filter the current list's rows, or a detail body's lines " +
+		"(including a live-streaming log) — narrows to lines/rows containing the query\n")
 	b.WriteString("  [yellow]1-9[white]   sort the current list by that column, numbered left to right " +
 		"(list views only) — press the same digit again to reverse direction\n")
 	b.WriteString("  [yellow]Tab[white]/[yellow]Shift+Tab[white]  cycle the facet tab bar, for resources that have one " +

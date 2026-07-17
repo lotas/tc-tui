@@ -41,7 +41,7 @@ type hint struct {
 }
 
 // renderHeaderHints rebuilds the header's center hint column: global keys,
-// the filter hint (list views only — `/` is a no-op on a detail view), the
+// the filter hint (`/` narrows a list's rows, or a detail body's lines), the
 // facet-switch hint when the current list has facets, and any
 // per-detail-action keys the current detail screen exposes. Hints are laid
 // out as a left-aligned grid of hintColumns columns, each padded to the
@@ -61,6 +61,7 @@ func (s *Shell) renderHeaderHints() {
 			hints = append(hints, hint{"L load all", "[yellow]L[white] load all"})
 		}
 	} else if top.Kind == DetailKind {
+		hints = append(hints, hint{"/ filter", "[yellow]/[white] filter"})
 		hints = append(hints, hint{"x wrap", "[yellow]x[white] wrap"})
 	}
 	if s.hasFacets() {
@@ -163,7 +164,11 @@ func (s *Shell) openCommandBar() {
 
 func (s *Shell) openFilter() {
 	s.footerMode = footerFilter
-	s.footerInput.SetLabel("[yellow]/[white] ").SetText(s.filterQuery)
+	query := s.filterQuery
+	if name, _ := s.content.GetFrontPage(); name == pageDetail {
+		query = s.detail.FilterQuery()
+	}
+	s.footerInput.SetLabel("[yellow]/[white] ").SetText(query)
 	s.footer.SwitchToPage(pageFooterInput)
 	s.app.SetFocus(s.footerInput)
 }
@@ -192,6 +197,13 @@ func (s *Shell) handleFooterInputChanged(text string) {
 		return
 	}
 
+	if name, _ := s.content.GetFrontPage(); name == pageDetail {
+		s.detail.SetFilterQuery(text)
+		s.refreshDetailTitle()
+		s.updateBorderColor()
+		return
+	}
+
 	s.filterQuery = text
 	s.refreshTable()
 }
@@ -209,8 +221,13 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 				s.switchResource(name, scope)
 			}
 		case footerFilter:
-			s.filterQuery = s.footerInput.GetText()
-			s.filterByResource[s.currentListResource] = s.filterQuery
+			// The detail-page filter is already applied live by
+			// handleFooterInputChanged and isn't resource-scoped the way a
+			// list filter is — Enter there just leaves the input.
+			if name, _ := s.content.GetFrontPage(); name != pageDetail {
+				s.filterQuery = s.footerInput.GetText()
+				s.filterByResource[s.currentListResource] = s.filterQuery
+			}
 			s.closeFooterInput()
 		case footerPrompt:
 			id := strings.TrimSpace(s.footerInput.GetText())
@@ -224,9 +241,15 @@ func (s *Shell) handleFooterInputDone(key tcell.Key) {
 		}
 	case tcell.KeyEscape:
 		if s.footerMode == footerFilter {
-			s.filterQuery = ""
-			s.filterByResource[s.currentListResource] = ""
-			s.refreshTable()
+			if name, _ := s.content.GetFrontPage(); name == pageDetail {
+				s.detail.SetFilterQuery("")
+				s.refreshDetailTitle()
+				s.updateBorderColor()
+			} else {
+				s.filterQuery = ""
+				s.filterByResource[s.currentListResource] = ""
+				s.refreshTable()
+			}
 		}
 		s.pendingLookupCommit = nil
 		s.closeFooterInput()

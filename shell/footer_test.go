@@ -103,15 +103,18 @@ func TestRenderHeaderHintsShowsFilterOnListView(t *testing.T) {
 	}
 }
 
-func TestRenderHeaderHintsOmitsFilterOnDetailView(t *testing.T) {
+func TestRenderHeaderHintsOnDetailView(t *testing.T) {
 	s := New(resource.NewRegistry())
 	s.stack.Push(View{ResourceName: "workerpools", Kind: DetailKind, SelectedID: "gcp/pool-a"})
 
 	s.renderHeaderHints()
 
 	text := s.headerHint.GetText(false)
-	if strings.Contains(text, "filter") {
-		t.Fatalf("expected no filter hint on a detail view, got %q", text)
+	if !strings.Contains(text, "/[white] filter") {
+		t.Fatalf("expected a filter hint on a detail view, got %q", text)
+	}
+	if strings.Contains(text, "truncate") || strings.Contains(text, "load all") {
+		t.Fatalf("expected no list-only hints on a detail view, got %q", text)
 	}
 }
 
@@ -264,5 +267,118 @@ func TestHandleFooterInputDoneFilterEscapeClearsPersistedValue(t *testing.T) {
 	}
 	if got := s.filterByResource["workerpools"]; got != "" {
 		t.Fatalf("expected filterByResource[workerpools] cleared, got %q", got)
+	}
+}
+
+func TestOpenFilterPrefillsFromDetailQueryOnDetailPage(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.detail.SetData(resource.Detail{Body: "alpha\nbeta\n"})
+	s.detail.SetFilterQuery("beta")
+	s.content.SwitchToPage(pageDetail)
+	s.filterQuery = "should-not-be-used"
+
+	s.openFilter()
+
+	if got := s.footerInput.GetText(); got != "beta" {
+		t.Fatalf("expected footer prefilled with the detail's own query %q, got %q", "beta", got)
+	}
+}
+
+func TestHandleFooterInputChangedAppliesDetailFilterLive(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.detail.SetData(resource.Detail{Body: "alpha\nbeta\ngamma\n"})
+	s.content.SwitchToPage(pageDetail)
+	s.footerMode = footerFilter
+
+	s.handleFooterInputChanged("beta")
+
+	if got := s.detail.GetText(true); got != "beta" {
+		t.Fatalf("expected the detail body filtered live, got %q", got)
+	}
+	if s.filterQuery != "" {
+		t.Fatalf("expected the list's own filterQuery untouched by a detail-page filter, got %q", s.filterQuery)
+	}
+}
+
+func TestHandleFooterInputDoneFilterEnterOnDetailDoesNotPersistPerResource(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentListResource = "workerpools"
+	s.detail.SetData(resource.Detail{Body: "alpha\nbeta\n"})
+	s.content.SwitchToPage(pageDetail)
+	s.footerMode = footerFilter
+	s.detail.SetFilterQuery("beta")
+	s.footerInput.SetText("beta")
+
+	s.handleFooterInputDone(tcell.KeyEnter)
+
+	if s.footerMode != footerIdle {
+		t.Fatalf("expected footer to close, got mode %v", s.footerMode)
+	}
+	if got := s.filterByResource["workerpools"]; got != "" {
+		t.Fatalf("expected a detail-page filter to never touch the list's per-resource memory, got %q", got)
+	}
+	if s.detail.FilterQuery() != "beta" {
+		t.Fatalf("expected the detail's own filter to survive closing the footer, got %q", s.detail.FilterQuery())
+	}
+}
+
+func TestHandleFooterInputDoneFilterEscapeOnDetailClearsOnlyDetailFilter(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.currentListResource = "workerpools"
+	s.filterByResource["workerpools"] = "proj-task"
+	s.filterQuery = "proj-task"
+	s.detail.SetData(resource.Detail{Body: "alpha\nbeta\n"})
+	s.content.SwitchToPage(pageDetail)
+	s.detail.SetFilterQuery("beta")
+	s.footerMode = footerFilter
+
+	s.handleFooterInputDone(tcell.KeyEscape)
+
+	if s.detail.FilterQuery() != "" {
+		t.Fatalf("expected the detail's filter cleared, got %q", s.detail.FilterQuery())
+	}
+	if s.filterQuery != "proj-task" || s.filterByResource["workerpools"] != "proj-task" {
+		t.Fatalf("expected the list's own filter state left untouched, got filterQuery=%q filterByResource=%q",
+			s.filterQuery, s.filterByResource["workerpools"])
+	}
+}
+
+func TestGlobalInputCaptureSlashOpensFilterOnDetailPage(t *testing.T) {
+	s := newTestShellForSort()
+	s.content.SwitchToPage(pageDetail)
+
+	event := tcell.NewEventKey(tcell.KeyRune, '/', tcell.ModNone)
+	if got := s.globalInputCapture(event); got != nil {
+		t.Fatalf("expected '/' to be swallowed, got %#v", got)
+	}
+
+	if s.footerMode != footerFilter {
+		t.Fatalf("expected '/' to open the filter on a detail page, got mode %v", s.footerMode)
+	}
+}
+
+func TestUpdateBorderColorTintsOnActiveDetailFilter(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.detail.SetData(resource.Detail{Body: "alpha\nbeta\n"})
+	s.content.SwitchToPage(pageDetail)
+	s.detail.SetFilterQuery("beta")
+
+	s.updateBorderColor()
+
+	if got := s.content.GetBorderColor(); got != tcell.ColorBlue {
+		t.Fatalf("expected blue border while a detail filter is active, got %v", got)
+	}
+}
+
+func TestRefreshDetailTitleAppendsFilterSuffix(t *testing.T) {
+	s := New(resource.NewRegistry())
+	s.detail.SetData(resource.Detail{Body: "alpha\nbeta\n"})
+	s.currentDetailTitle = "task:abc"
+	s.detail.SetFilterQuery("beta")
+
+	s.refreshDetailTitle()
+
+	if got, want := s.content.GetTitle(), "[ Taskcluster :: task:abc (beta) ]"; got != want {
+		t.Fatalf("unexpected title: got %q, want %q", got, want)
 	}
 }

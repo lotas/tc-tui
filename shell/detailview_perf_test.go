@@ -68,3 +68,31 @@ func TestDetailViewDrawIsNotQuadraticForLargeBodies(t *testing.T) {
 		t.Fatalf("Draw of a 10k-line body did not finish within %v — the UI goroutine is stalled", drawBudget)
 	}
 }
+
+// TestDetailViewSetFilterQueryIsNotQuadraticForLargeBodies guards the '/'
+// filter's own per-keystroke cost (stripDisplayTags + line filtering), which
+// runs entirely off tview's Draw path but over the same class of large body
+// — a linear-per-keystroke cost is fine (comparable to a single Draw), a
+// quadratic one would reintroduce the freeze this budget exists to catch,
+// just triggered by typing instead of rendering.
+func TestDetailViewSetFilterQueryIsNotQuadraticForLargeBodies(t *testing.T) {
+	d := NewDetailView()
+	d.SetRect(0, 0, 200, 50)
+	d.SetData(resource.Detail{Body: largeLogBody(10000)})
+
+	done := make(chan time.Duration, 1)
+	go func() {
+		start := time.Now()
+		d.SetFilterQuery("step 9999")
+		done <- time.Since(start)
+	}()
+
+	select {
+	case elapsed := <-done:
+		if elapsed > drawBudget {
+			t.Fatalf("SetFilterQuery over a 10k-line body took %v, over the %v budget", elapsed, drawBudget)
+		}
+	case <-time.After(drawBudget):
+		t.Fatalf("SetFilterQuery over a 10k-line body did not finish within %v", drawBudget)
+	}
+}

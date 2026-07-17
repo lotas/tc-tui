@@ -321,11 +321,15 @@ func (s *Shell) toggleDetailWrap() {
 // refreshDetailTitle rebuilds the detail page's title from
 // currentDetailTitle, appending a "[no wrap]" suffix while word-wrap is
 // toggled off — the detail-page counterpart of refreshTable's "[no
-// truncation]" suffix.
+// truncation]" suffix — and a "(query)" suffix while a '/' filter is active,
+// mirroring refreshTable's own filter suffix.
 func (s *Shell) refreshDetailTitle() {
 	title := s.currentDetailTitle
 	if !s.detail.WrapEnabled() {
 		title += " [no wrap]"
+	}
+	if query := s.detail.FilterQuery(); query != "" {
+		title += " (" + query + ")"
 	}
 	s.setTitle(title)
 }

@@ -287,8 +287,9 @@ func (s *Shell) init() {
 
 // globalInputCapture handles keys that apply regardless of which content
 // view has focus: `q` quits from navigable views, `:` opens the command bar,
-// `/` opens the filter (list views only), `?` toggles the help overlay, and
-// Esc pops the view stack (a no-op at the root, or closes help if open).
+// `/` opens the filter (narrows a list's rows, or a detail body's lines,
+// including a live-streaming one), `?` toggles the help overlay, and Esc
+// pops the view stack (a no-op at the root, or closes help if open).
 // While the footer input is active, every key passes through untouched so it
 // can be typed into the input field. While help is open, every key is
 // swallowed except q, Esc/`?`, and the scroll keys.
@@ -332,7 +333,8 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		s.openCommandBar()
 		return nil
 	case event.Rune() == '/':
-		if name, _ := s.content.GetFrontPage(); name == pageTable {
+		switch name, _ := s.content.GetFrontPage(); name {
+		case pageTable, pageDetail:
 			s.openFilter()
 		}
 		return nil
@@ -411,18 +413,22 @@ func (s *Shell) setTitle(title string) {
 }
 
 // updateBorderColor tints s.content's border blue while a filter is active
-// on the currently visible list, so a filtered view is distinguishable at a
-// glance rather than only via the title-bar query suffix. Blue rather than
-// yellow, since yellow is already used for shortcut/header highlights
-// elsewhere and wouldn't stand out here. The border is shared by every page
-// in s.content (table/detail/error/help all live in the same Pages Box), so
-// this must be recomputed any time either the front page or s.filterQuery
-// changes — not just from refreshTable.
+// on the currently visible list or detail body, so a filtered view is
+// distinguishable at a glance rather than only via the title-bar query
+// suffix. Blue rather than yellow, since yellow is already used for
+// shortcut/header highlights elsewhere and wouldn't stand out here. The
+// border is shared by every page in s.content (table/detail/error/help all
+// live in the same Pages Box), so this must be recomputed any time either
+// the front page, s.filterQuery, or s.detail's own filter changes — not
+// just from refreshTable.
 func (s *Shell) updateBorderColor() {
 	front, _ := s.content.GetFrontPage()
-	if front == pageTable && s.filterQuery != "" {
+	switch {
+	case front == pageTable && s.filterQuery != "":
 		s.content.SetBorderColor(tcell.ColorBlue)
-	} else {
+	case front == pageDetail && s.detail.FilterQuery() != "":
+		s.content.SetBorderColor(tcell.ColorBlue)
+	default:
 		s.content.SetBorderColor(tview.Styles.BorderColor)
 	}
 }

@@ -141,7 +141,7 @@ func (s *Shell) runDetailStream(ls resource.LiveStreamer, id string, gen int, is
 		case truncated:
 			banner = "\n[yellow](live stream hit the size cap — press 'o' to open the full log)[white]"
 		}
-		s.detail.AppendStream(banner)
+		s.detail.AppendBanner(banner)
 
 		s.currentDetailTitle = strings.TrimSuffix(s.currentDetailTitle, liveTitleSuffix) + " (ended)"
 		s.refreshDetailTitle()
