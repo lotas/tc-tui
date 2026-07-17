@@ -55,6 +55,8 @@ func buildRegistry(tc taskcluster.Taskcluster) *resource.Registry {
 	registry.Register(resource.NewTaskArtifactsResource(tc))
 	registry.Register(resource.NewPendingTasksResource(tc))
 	registry.Register(resource.NewClaimedTasksResource(tc))
+	registry.Register(resource.NewGithubBuildsResource(tc))
+	registry.Register(resource.NewGithubRepositoryResource(tc))
 	registry.Register(resource.NewHistoryResource())
 	return registry
 }

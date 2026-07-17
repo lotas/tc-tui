@@ -16,6 +16,7 @@ import (
 	tcurls "github.com/taskcluster/taskcluster-lib-urls"
 	tcclient "github.com/taskcluster/taskcluster/v101/clients/client-go"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcgithub"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tchooks"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcindex"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcpurgecache"
@@ -48,6 +49,20 @@ type IndexNamespaceList []tcindex.Namespace                       // ListNamespa
 type IndexTaskList []tcindex.Task                                 // ListTasks' members
 type HookList []tchooks.HookDefinition                            // ListHooks' members, across all hook groups
 type HookLastFireList []tchooks.Var                               // ListLastFires' members
+type GithubBuildList []tcgithub.Build                             // Builds' members
+
+// GithubBuildFilter's Organization and Repository are always required by
+// GetGithubBuilds; exactly one of PullRequest/SHA is required too — see
+// resource.GithubBuildsResource's scope grammar, the only caller.
+// Organization and Repository must already have '.' translated to '%' by
+// the caller (see resource.githubDotsToPercent) — GetGithubBuilds sends
+// them to the API verbatim, it does not re-translate.
+type GithubBuildFilter struct {
+	Organization string
+	Repository   string
+	PullRequest  string // decimal PR number, as the API expects it
+	SHA          string // exactly 40 lowercase hex characters
+}
 
 type Taskcluster interface {
 	GetVersion() Version
@@ -98,6 +113,9 @@ type Taskcluster interface {
 	GetIndexNamespaces(namespace string) (IndexNamespaceList, error)
 	GetIndexTasks(namespace string) (IndexTaskList, error)
 	FindIndexedTask(indexPath string) (*tcindex.IndexedTaskResponse, error)
+
+	GetGithubBuilds(filter GithubBuildFilter) (GithubBuildList, error)
+	GetGithubRepository(owner, repo string) (*tcgithub.RepositoryResponse, error)
 }
 
 type TC struct {
@@ -108,6 +126,7 @@ type TC struct {
 	purgeCache *tcpurgecache.PurgeCache
 	index      *tcindex.Index
 	hooks      *tchooks.Hooks
+	github     *tcgithub.Github
 
 	tcRoot string
 }
@@ -128,6 +147,7 @@ func NewTaskcluster() Taskcluster {
 		purgeCache: tcpurgecache.NewFromEnv(),
 		index:      tcindex.NewFromEnv(),
 		hooks:      tchooks.NewFromEnv(),
+		github:     tcgithub.NewFromEnv(),
 	}
 
 	tc.tcRoot = tc.auth.RootURL
@@ -788,6 +808,38 @@ func (tc *TC) FindIndexedTask(indexPath string) (*tcindex.IndexedTaskResponse, e
 	}
 
 	return task, nil
+}
+
+// GetGithubBuilds returns every build matching filter — unbounded (see
+// paginate, not paginateUpTo): scoping to one PR or one SHA keeps the
+// result set naturally small (a handful of rows per push/sync event),
+// unlike an org- or repo-wide fetch, which the Github service's
+// oldest-updated-first-only ordering (no descending/keyset option) makes
+// unsafe to page through with a cap — a capped fetch would silently return
+// the OLDEST N builds, never recent ones. This resource deliberately never
+// fetches unscoped.
+func (tc *TC) GetGithubBuilds(filter GithubBuildFilter) (GithubBuildList, error) {
+	builds, err := paginate(func(cont string) ([]tcgithub.Build, string, error) {
+		resp, err := tc.github.Builds(cont, PageSize, filter.Organization, filter.PullRequest, filter.Repository, filter.SHA)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Builds, resp.ContinuationToken, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return GithubBuildList(builds), nil
+}
+
+// GetGithubRepository reports a single repo's Taskcluster-Github install
+// status. Stability: EXPERIMENTAL upstream (surfaced to the user as a
+// caveat in resource.GithubRepositoryResource's Detail body, not hidden
+// here). owner/repo are sent verbatim — unlike GetGithubBuilds, this
+// endpoint takes the real Github name, not a sanitized/stored field.
+func (tc *TC) GetGithubRepository(owner, repo string) (*tcgithub.RepositoryResponse, error) {
+	return tc.github.Repository(owner, repo)
 }
 
 // isNotFound reports whether err is a Taskcluster API error with a 404

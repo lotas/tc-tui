@@ -4,6 +4,7 @@ import (
 	"regexp"
 
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
+	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcgithub"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tchooks"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcindex"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
@@ -144,6 +145,15 @@ type fakeTaskcluster struct {
 	indexTasksErr      error
 	findIndexedTask    *tcindex.IndexedTaskResponse
 	findIndexedTaskErr error
+
+	githubBuilds       taskcluster.GithubBuildList
+	githubBuildsErr    error
+	githubBuildsFilter taskcluster.GithubBuildFilter // last filter GetGithubBuilds was called with
+
+	githubRepository      *tcgithub.RepositoryResponse
+	githubRepositoryErr   error
+	githubRepositoryOwner string // last owner param GetGithubRepository was called with
+	githubRepositoryRepo  string // last repo param GetGithubRepository was called with
 }
 
 func (f *fakeTaskcluster) GetVersion() taskcluster.Version { return taskcluster.Version{} }
@@ -321,4 +331,15 @@ func (f *fakeTaskcluster) GetIndexTasks(namespace string) (taskcluster.IndexTask
 
 func (f *fakeTaskcluster) FindIndexedTask(indexPath string) (*tcindex.IndexedTaskResponse, error) {
 	return f.findIndexedTask, f.findIndexedTaskErr
+}
+
+func (f *fakeTaskcluster) GetGithubBuilds(filter taskcluster.GithubBuildFilter) (taskcluster.GithubBuildList, error) {
+	f.githubBuildsFilter = filter
+	return f.githubBuilds, f.githubBuildsErr
+}
+
+func (f *fakeTaskcluster) GetGithubRepository(owner, repo string) (*tcgithub.RepositoryResponse, error) {
+	f.githubRepositoryOwner = owner
+	f.githubRepositoryRepo = repo
+	return f.githubRepository, f.githubRepositoryErr
 }
