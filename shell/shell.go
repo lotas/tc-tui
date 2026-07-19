@@ -15,6 +15,7 @@ const (
 	pageDetail = "detail"
 	pageError  = "error"
 	pageHelp   = "help"
+	pageAction = "action"
 
 	pageFooterBreadcrumb = "breadcrumb"
 	pageFooterInput      = "input"
@@ -56,14 +57,29 @@ type Shell struct {
 	headerLeft *tview.TextView
 	headerHint *tview.TextView
 
-	content   *tview.Pages
-	table     *TableView
-	detail    *DetailView
-	errorView *ErrorView
-	helpView  *HelpView
+	content    *tview.Pages
+	table      *TableView
+	detail     *DetailView
+	errorView  *ErrorView
+	helpView   *HelpView
+	actionView *ActionView
 
 	helpOpen    bool
 	preHelpPage string
+
+	// actionOpen is true while the authenticated-action dialog (ActionView)
+	// is front and focused. Like footerMode/helpOpen it gates
+	// globalInputCapture: every key passes straight through to the dialog's
+	// form so the user can type/tab/confirm, rather than being intercepted as
+	// a global shortcut.
+	actionOpen bool
+	// actionBusy is true while the current action's Perform is running, so a
+	// second Confirm activation is ignored until it finishes.
+	actionBusy bool
+	// actionReturnPage is the content page to restore when the dialog closes.
+	actionReturnPage string
+	// currentAction is the action the open dialog is collecting input for.
+	currentAction resource.Action
 
 	footer              *tview.Pages
 	footerBreadcrumb    *tview.TextView
@@ -93,6 +109,13 @@ type Shell struct {
 	filterByResource     map[string]string
 	currentDetailActions []resource.DetailAction
 	currentDetailTitle   string
+
+	// currentActions holds the mutating actions the current Detail entity
+	// exposes (via resource.Actionable), used to render their key hints in
+	// the header. Dispatch resolves actions fresh at key-press time (see
+	// resolveActionByKey) rather than from this slice, so it's purely for the
+	// hint row; nil when the current view has none.
+	currentActions []resource.Action
 
 	// currentListTruncated reports whether the current list view's rows were
 	// capped at the safe fetch limit with more left unfetched server-side
@@ -293,12 +316,14 @@ func (s *Shell) init() {
 
 	s.errorView = NewErrorView()
 	s.helpView = NewHelpView()
+	s.actionView = NewActionView()
 
 	s.content = tview.NewPages().
 		AddPage(pageTable, s.tableContainer, true, true).
 		AddPage(pageDetail, s.detail, true, false).
 		AddPage(pageError, s.errorView, true, false).
-		AddPage(pageHelp, s.helpView, true, false)
+		AddPage(pageHelp, s.helpView, true, false).
+		AddPage(pageAction, s.actionView, true, false)
 	s.content.SetBorder(true)
 	s.activeContent = s.table
 
@@ -357,6 +382,13 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			s.cycleFooterHistory(1)
 			return nil
 		}
+		return event
+	}
+
+	// While the action dialog is open every key belongs to its form (typing
+	// into a YAML/reason field, Tab between fields/buttons, Enter to confirm,
+	// Esc to cancel) — never a global shortcut.
+	if s.actionOpen {
 		return event
 	}
 
@@ -434,6 +466,14 @@ func (s *Shell) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 				s.navigateTo(action.Target)
 				return nil
 			}
+		}
+		// Mutating actions (Actionable) are dispatched after navigation
+		// actions so a resource can't accidentally shadow a navigation key,
+		// and resolved against the current target at press time so a
+		// list-row action reflects the highlighted row.
+		if action, ok := s.resolveActionByKey(event.Rune()); ok {
+			s.startAction(action)
+			return nil
 		}
 	}
 

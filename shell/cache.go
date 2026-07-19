@@ -84,3 +84,16 @@ func (c *listCache) get(key cacheKey, ttl time.Duration) (cacheEntry, bool) {
 func (c *listCache) set(key cacheKey, entry cacheEntry) {
 	c.entries[key] = entry
 }
+
+// invalidate drops every cached list entry for resourceName across all
+// scopes and facets, forcing the next load of any of its views to re-fetch.
+// Used after a successful mutation so a stale, pre-mutation row set isn't
+// served from cache once the user navigates back to (or auto-refreshes) an
+// affected list.
+func (c *listCache) invalidate(resourceName string) {
+	for key := range c.entries {
+		if key.resource == resourceName {
+			delete(c.entries, key)
+		}
+	}
+}

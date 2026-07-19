@@ -80,6 +80,14 @@ func (s *Shell) renderHeaderHints() {
 			colored: fmt.Sprintf("[yellow]%c[white] %s", action.Key, action.Label),
 		})
 	}
+	// Mutating actions get a red key so an authenticated/destructive
+	// operation reads differently at a glance from a plain navigation hint.
+	for _, action := range s.currentActions {
+		hints = append(hints, hint{
+			plain:   fmt.Sprintf("%c %s", action.Key, action.Label),
+			colored: fmt.Sprintf("[red]%c[white] %s", action.Key, action.Label),
+		})
+	}
 
 	// Each column is only as wide as the widest hint that actually falls in
 	// it, not the widest hint overall — otherwise one long hint (e.g. the

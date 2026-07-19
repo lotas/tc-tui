@@ -985,6 +985,7 @@ func shouldRedrawAugmentTick(completed, total int, lastRedraw, now time.Time) bo
 
 func (s *Shell) renderDetail(res resource.Resource, id string, isRestore bool) {
 	s.currentDetailActions = nil
+	s.currentActions = nil
 	s.closeFooterInput()
 
 	s.renderHeaderHints()
@@ -1043,6 +1044,11 @@ func (s *Shell) loadDetail(res resource.Resource, id string, isInitial, isRestor
 				s.detail.UpdateData(detail)
 			}
 			s.currentDetailActions = detail.Actions
+			if act, ok := res.(resource.Actionable); ok {
+				s.currentActions = act.Actions(id)
+			} else {
+				s.currentActions = nil
+			}
 			s.activeContent = s.detail
 			s.currentDetailTitle = detail.Title
 			s.refreshDetailTitle()
