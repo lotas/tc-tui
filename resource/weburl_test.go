@@ -111,7 +111,7 @@ func TestTaskResourceWebURL(t *testing.T) {
 }
 
 func TestTasksResourceWebURL(t *testing.T) {
-	res := NewTasksResource(&fakeTaskcluster{})
+	res := NewTasksResource(&fakeTaskcluster{}, &taskDefHistory{})
 
 	if got, want := res.ListWebURL(testRootURL, "GROUP1"), testRootURL+"/tasks/groups/GROUP1"; got != want {
 		t.Errorf("ListWebURL = %q, want %q", got, want)
@@ -122,7 +122,7 @@ func TestTasksResourceWebURL(t *testing.T) {
 }
 
 func TestTaskGroupResourceWebURL(t *testing.T) {
-	res := NewTaskGroupResource(&fakeTaskcluster{})
+	res := NewTaskGroupResource(&fakeTaskcluster{}, &taskDefHistory{})
 
 	if got, want := res.ListWebURL(testRootURL, "GROUP1"), testRootURL+"/tasks/groups/GROUP1"; got != want {
 		t.Errorf("ListWebURL = %q, want %q", got, want)

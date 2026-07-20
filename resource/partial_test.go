@@ -20,7 +20,7 @@ func TestTasksResourceListPartialCapsFetchAndReportsMore(t *testing.T) {
 		},
 		taskGroupTasksTruncated: true,
 	}
-	res := NewTasksResource(fake)
+	res := NewTasksResource(fake, &taskDefHistory{})
 
 	rows, more, err := res.ListPartial("group-1", "", false)
 	if err != nil {
@@ -39,7 +39,7 @@ func TestTasksResourceListPartialCapsFetchAndReportsMore(t *testing.T) {
 
 func TestTasksResourceListPartialLoadAllLiftsCap(t *testing.T) {
 	fake := &fakeTaskcluster{}
-	res := NewTasksResource(fake)
+	res := NewTasksResource(fake, &taskDefHistory{})
 
 	_, more, err := res.ListPartial("group-1", "", true)
 	if err != nil {
@@ -55,7 +55,7 @@ func TestTasksResourceListPartialLoadAllLiftsCap(t *testing.T) {
 
 func TestTaskGroupResourceListPartialCapsFetch(t *testing.T) {
 	fake := &fakeTaskcluster{taskGroupTasksTruncated: true}
-	res := NewTaskGroupResource(fake)
+	res := NewTaskGroupResource(fake, &taskDefHistory{})
 
 	_, more, err := res.ListPartial("group-1", "", false)
 	if err != nil {
@@ -147,7 +147,7 @@ func TestClaimedTasksResourceListPartialCapsFetch(t *testing.T) {
 func TestListPartialPropagatesError(t *testing.T) {
 	wantErr := errors.New("boom")
 	fake := &fakeTaskcluster{taskGroupTasksErr: wantErr}
-	res := NewTasksResource(fake)
+	res := NewTasksResource(fake, &taskDefHistory{})
 
 	_, _, err := res.ListPartial("group-1", "", false)
 	if !errors.Is(err, wantErr) {

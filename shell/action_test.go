@@ -423,6 +423,178 @@ func TestGlobalKeysPassThroughWhileActionOpen(t *testing.T) {
 	}
 }
 
+func TestCreateTaskCommandOpensDialogFromAnywhere(t *testing.T) {
+	s, _ := actionableShell(t, nil) // helper pushes a non-empty base stack
+	s.registry.Register(resource.NewCreateTaskResource(nil, resource.NewTaskDefHistory()))
+	s.openInEditor = func(seed string) (string, error) { return seed, nil }
+	startRunning(t, s)
+
+	s.app.QueueUpdateDraw(func() { s.switchResource("createtask", "") })
+	waitFor(t, func() bool { return readOnUI(s, func() bool { return s.actionOpen }) })
+	if readOnUI(s, func() string { return s.currentAction.Label }) == "" {
+		t.Fatal(":createtask dispatched without the create action")
+	}
+}
+
+func TestEditorHandoffReportsUnavailableScreen(t *testing.T) {
+	s, _ := actionableShell(t, nil)
+	s.openInEditor = func(string) (string, error) { return "", errEditorScreenUnavailable }
+	startRunning(t, s)
+
+	a := resource.Action{Label: "create task", Input: resource.InputExternalEditor,
+		Perform: func(resource.ActionInput) error { return nil }}
+	s.app.QueueUpdateDraw(func() { s.startAction(a) })
+	waitFor(t, func() bool {
+		return strings.Contains(readOnUI(s, func() string { return s.footerBreadcrumb.GetText(true) }), "unavailable")
+	})
+	if readOnUI(s, func() bool { return s.actionOpen }) {
+		t.Fatal("a failed handoff must not leave the action open")
+	}
+}
+
+// shellWithRootAndCreateTask builds a Shell with a real listable resource
+// named root plus CreateTaskResource, and an EMPTY nav stack — the cold-start
+// shape (`tc-tui createtask` with no restored/base view) actionableShell
+// deliberately doesn't produce.
+func shellWithRootAndCreateTask(t *testing.T, root string) *Shell {
+	t.Helper()
+	registry := resource.NewRegistry()
+	registry.Register(fakeResource{name: root})
+	registry.Register(resource.NewCreateTaskResource(nil, resource.NewTaskDefHistory()))
+	return New(registry)
+}
+
+func TestColdStartCommandActionCancelReturnsToRoot(t *testing.T) {
+	// `tc-tui createtask` from an empty stack: cancelling must land on the root
+	// view (widgets), not a blank screen. This also proves the deferred handoff
+	// runs after the loop starts (replaces the old defer-only test).
+	s := shellWithRootAndCreateTask(t, "widgets")
+	s.openInEditor = func(string) (string, error) { return "name: x", nil }
+	screen := tcell.NewSimulationScreen("")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("failed to init simulation screen: %v", err)
+	}
+	s.app.SetScreen(screen)
+	go func() { _ = s.StartAt("widgets", "createtask", "") }()
+	waitFor(t, func() bool { return readOnUI(s, func() bool { return s.actionOpen }) })
+	s.app.QueueUpdateDraw(func() { s.closeAction() })
+	waitFor(t, func() bool {
+		return !readOnUI(s, func() bool { return s.actionOpen }) &&
+			readOnUI(s, func() bool { v, ok := s.stack.Top(); return ok && v.ResourceName == "widgets" })
+	})
+	readOnUI(s, func() struct{} { s.Stop(); return struct{}{} })
+}
+
+func TestColdStartCommandActionEditorFailureReturnsToRoot(t *testing.T) {
+	s := shellWithRootAndCreateTask(t, "widgets")
+	s.openInEditor = func(string) (string, error) { return "", errEditorScreenUnavailable }
+	screen := tcell.NewSimulationScreen("")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("failed to init simulation screen: %v", err)
+	}
+	s.app.SetScreen(screen)
+	go func() { _ = s.StartAt("widgets", "createtask", "") }()
+	waitFor(t, func() bool {
+		return !readOnUI(s, func() bool { return s.actionOpen }) &&
+			readOnUI(s, func() bool { v, ok := s.stack.Top(); return ok && v.ResourceName == "widgets" })
+	})
+	readOnUI(s, func() struct{} { s.Stop(); return struct{}{} })
+}
+
+func TestEditorConfirmCancelAfterReEditReturnsToOrigin(t *testing.T) {
+	// startAction from an origin page (widgets' detail); edit; Edit Again;
+	// Cancel must land back on the origin page, not on pageEditorConfirm, with
+	// actionOpen=false.
+	s, _ := actionableShell(t, nil)
+	s.openInEditor = func(seed string) (string, error) { return seed + "-edited", nil }
+	startRunning(t, s)
+
+	// actionableShell only pushes a Detail View onto the stack without
+	// rendering it; render it for real so the origin page is genuinely
+	// pageDetail (not whatever page New() happens to default to).
+	s.app.QueueUpdateDraw(func() { s.showDetail("widgets", "w1") })
+	waitFor(t, func() bool {
+		return readOnUI(s, func() string { name, _ := s.content.GetFrontPage(); return name }) == pageDetail
+	})
+
+	a := resource.Action{Label: "create task", Input: resource.InputExternalEditor,
+		InitialText: "name: x", Perform: func(resource.ActionInput) error { return nil }}
+	s.app.QueueUpdateDraw(func() { s.startAction(a) })
+	waitFor(t, func() bool { return readOnUI(s, func() bool { return s.actionOpen }) })
+	if front := readOnUI(s, func() string { name, _ := s.content.GetFrontPage(); return name }); front != pageEditorConfirm {
+		t.Fatalf("expected the confirm screen to be front, got %q", front)
+	}
+
+	// Edit Again: dispatches through the confirm view's own key handler,
+	// exactly as globalInputCapture would once actionOpen routes it there.
+	s.app.QueueUpdateDraw(func() {
+		s.editorConfirm.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'e', tcell.ModNone), func(tview.Primitive) {})
+	})
+	// openInEditor appends "-edited" every call, including the initial handoff
+	// (which already turned "name: x" into "name: x-edited") — a SECOND
+	// "-edited" here proves Edit Again re-seeded from the CURRENT buffer, not
+	// the action's original InitialText.
+	waitFor(t, func() bool {
+		return readOnUI(s, func() bool { return s.editorConfirm.buffer == "name: x-edited-edited" })
+	})
+
+	s.app.QueueUpdateDraw(func() {
+		s.editorConfirm.InputHandler()(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone), func(tview.Primitive) {})
+	})
+	waitFor(t, func() bool { return !readOnUI(s, func() bool { return s.actionOpen }) })
+
+	if front := readOnUI(s, func() string { name, _ := s.content.GetFrontPage(); return name }); front != pageDetail {
+		t.Fatalf("Cancel after Edit Again returned to %q, want the true origin pageDetail", front)
+	}
+}
+
+func TestEditorConfirmRetryAfterPerformFailureReusesIdenticalRaw(t *testing.T) {
+	// End-to-end through the real submit path (performActionInput), not just
+	// EditorConfirmView in isolation: a Perform failure must not change what
+	// the confirm screen resubmits on retry — createTaskAction's
+	// retry-idempotency memo depends on the raw text staying byte-identical
+	// across attempts (see resource/create_task.go), so a lost-response retry
+	// reuses the same taskId instead of minting a new one.
+	s, _ := actionableShell(t, nil)
+	s.openInEditor = func(seed string) (string, error) { return seed, nil }
+	startRunning(t, s)
+
+	var gotRaw []string
+	var callCount int32
+	a := resource.Action{
+		Label:       "create task",
+		Input:       resource.InputExternalEditor,
+		InitialText: "name: x",
+		Perform: func(in resource.ActionInput) error {
+			gotRaw = append(gotRaw, in.Raw)
+			if atomic.AddInt32(&callCount, 1) == 1 {
+				return fmt.Errorf("transport blip")
+			}
+			return nil
+		},
+	}
+	s.app.QueueUpdateDraw(func() { s.startAction(a) })
+	waitFor(t, func() bool { return readOnUI(s, func() bool { return s.actionOpen }) })
+
+	confirm := func() {
+		s.app.QueueUpdateDraw(func() {
+			s.editorConfirm.InputHandler()(tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModNone), func(tview.Primitive) {})
+		})
+	}
+	confirm() // first attempt: fails
+	waitFor(t, func() bool { return atomic.LoadInt32(&callCount) == 1 })
+	confirm() // retry: must resubmit the identical raw text
+	waitFor(t, func() bool { return atomic.LoadInt32(&callCount) == 2 })
+
+	if readOnUI(s, func() string { return s.editorConfirm.buffer }) != "name: x" {
+		t.Fatalf("v.buffer must stay byte-identical after a Perform failure, got %q",
+			readOnUI(s, func() string { return s.editorConfirm.buffer }))
+	}
+	if len(gotRaw) != 2 || gotRaw[0] != gotRaw[1] || gotRaw[0] != "name: x" {
+		t.Fatalf("Perform got %v across retries, want [\"name: x\", \"name: x\"]", gotRaw)
+	}
+}
+
 func TestRenderHeaderHintsShowsActionKeys(t *testing.T) {
 	s := New(resource.NewRegistry())
 	s.stack.Push(View{ResourceName: "widgets", Kind: DetailKind, SelectedID: "w1"})

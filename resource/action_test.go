@@ -96,15 +96,32 @@ func TestParseActionInputOptionalYAMLBlankSkipsParse(t *testing.T) {
 
 func TestInputModeMultiline(t *testing.T) {
 	multiline := map[InputMode]bool{
-		InputNone: false,
-		InputLine: false,
-		InputText: true,
-		InputYAML: true,
-		InputJSON: true,
+		InputNone:           false,
+		InputLine:           false,
+		InputText:           true,
+		InputYAML:           true,
+		InputJSON:           true,
+		InputExternalEditor: false,
 	}
 	for mode, want := range multiline {
 		if got := mode.Multiline(); got != want {
 			t.Errorf("InputMode(%d).Multiline() = %v, want %v", mode, got, want)
 		}
+	}
+}
+
+func TestParseActionInputExternalEditorReturnsRaw(t *testing.T) {
+	in, err := ParseActionInput(InputExternalEditor, "name: x\n", true)
+	if err != nil {
+		t.Fatalf("InputExternalEditor must parse: %v", err)
+	}
+	if in.Raw != "name: x\n" {
+		t.Fatalf("Raw = %q, want the buffer verbatim", in.Raw)
+	}
+}
+
+func TestInputExternalEditorIsNotInTUIMultiline(t *testing.T) {
+	if InputExternalEditor.Multiline() {
+		t.Fatal("InputExternalEditor is not an in-TUI text area")
 	}
 }

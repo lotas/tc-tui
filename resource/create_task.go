@@ -13,19 +13,17 @@ import (
 
 	"github.com/taskcluster/slugid-go/slugid"
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcqueue"
-	"sigs.k8s.io/yaml"
+	"gopkg.in/yaml.v3"
+	yamlconv "sigs.k8s.io/yaml"
 
 	"github.com/taskcluster/tc-tui/taskcluster"
 )
 
-// createTaskKey triggers the (timestamp-rebasing) create-task action from the
-// tasks list; createTaskKeepKey triggers the variant that submits the given
-// created/deadline/expires unchanged. Both avoid the shell's global keys (q,
-// r, o, s, x, n, L, :, /, ?), and the task list has no other action keys.
-const (
-	createTaskKey     = 'c'
-	createTaskKeepKey = 'C'
-)
+// createTaskKey triggers the create-task action from the tasks/task-group
+// lists. It avoids the shell's global keys (q, r, o, s, x, n, L, :, /, ?) —
+// and, on worker pools, 'c' is taken for the "claimed" nav action, but the
+// tasks/taskgroup lists have no other action keys, so it's free there.
+const createTaskKey = 'c'
 
 // maxRetainedTaskDefs caps how many recently submitted task definitions the
 // create-task action keeps around for reuse.
@@ -40,13 +38,14 @@ const taskTimeLayout = "2006-01-02T15:04:05.000Z07:00"
 // accepted in place of a generated one.
 var slugidRe = regexp.MustCompile(`^[A-Za-z0-9_-]{8}[Q-T][A-Za-z0-9_-][CGKOSWaeimquy26-][A-Za-z0-9_-]{10}[AQgw]$`)
 
-// createTaskTemplate prefills the dialog the first time it is opened (before
-// any definition has been submitted), giving the user a valid-shaped starting
-// point rather than an empty text area. taskId is omitted so one is generated;
-// the timestamps are stale on purpose, to be rebased to now on submission.
-const createTaskTemplate = `# Task definition (YAML or JSON). Omit taskId to have one generated, or supply
-# a slugid to reuse. The 'create task' action rebases created/deadline/expires
-# to now; 'create task (keep timestamps)' submits them unchanged.
+// createTaskTemplate prefills the $EDITOR buffer the first time it is opened
+// (before any definition has been submitted), giving the user a valid-shaped
+// starting point rather than an empty file. taskId is omitted so one is
+// generated; the timestamps are stale on purpose — press 'u' on the confirm
+// screen to rebase created/deadline/expires to now before submitting.
+const createTaskTemplate = `# Task definition (YAML or JSON), edited in $EDITOR. Omit taskId to have one
+# generated, or supply a slugid to reuse. Press 'u' on the confirm screen to
+# rebase created/deadline/expires to now.
 provisionerId: proj-taskcluster
 workerType: gw-ci-ubuntu-24-04
 schedulerId: tc-tui
@@ -121,37 +120,28 @@ func (h *taskDefHistory) latest() (string, bool) {
 	return h.recent[0], true
 }
 
-// createTaskAction builds a "create task" action exposed on the tasks
-// resource. rebase selects the timestamp-rebasing variant ('c') versus the
-// preserve-as-written variant ('C'). A fresh Action is returned per call so
-// the createdTaskID that Perform stores and Next reads is scoped to a single
-// dialog. The dialog prefills with the last submitted definition and offers
-// the whole retained history for cycling (see Action.InputHistory).
-func createTaskAction(tc taskcluster.Taskcluster, history *taskDefHistory, rebase bool) Action {
-	hist := history.all()
+// NewTaskDefHistory returns an empty shared create-task history for injection
+// into the tasks, task-group, and createtask resources so a definition
+// submitted from any entry point seeds the others.
+func NewTaskDefHistory() *taskDefHistory { return &taskDefHistory{} }
+
+// createTaskAction builds the single "create task" action exposed on the
+// tasks/task-group lists and the global `:createtask` command. The
+// definition is edited in $EDITOR (InputExternalEditor) rather than an
+// in-TUI field; timestamps are submitted exactly as written unless the user
+// applies the "update timestamps" BufferTransform on the confirm screen. A
+// fresh Action is returned per call so the createdTaskID that Perform stores
+// and Next reads is scoped to a single dialog. InitialText seeds from the
+// shared history's latest submission, if any.
+func createTaskAction(tc taskcluster.Taskcluster, history *taskDefHistory) Action {
 	initial := createTaskTemplate
-	if len(hist) > 0 {
-		initial = hist[0]
+	if latest, ok := history.latest(); ok {
+		initial = latest
 	}
 
-	label := "create task"
-	prompt := "Paste a task definition as YAML or JSON. A taskId is generated for you " +
-		"(or supply a slugid), and the created / deadline / expires timestamps are " +
-		"rebased to now before the task is submitted."
-	if !rebase {
-		label = "create task (keep timestamps)"
-		prompt = "Paste a task definition as YAML or JSON. A taskId is generated for you " +
-			"(or supply a slugid); the created / deadline / expires timestamps are " +
-			"submitted exactly as written."
-	}
-	if len(hist) > 0 {
-		prompt += " Press Ctrl-P / Ctrl-N to cycle through recent definitions."
-	}
-
-	key := createTaskKey
-	if !rebase {
-		key = createTaskKeepKey
-	}
+	prompt := "Edit the task definition (YAML or JSON) in $EDITOR. A taskId is generated " +
+		"for you (or supply a slugid to reuse). Timestamps are submitted exactly as " +
+		"written unless you apply \"update timestamps\" on the confirm screen."
 
 	var createdTaskID string
 
@@ -160,8 +150,8 @@ func createTaskAction(tc taskcluster.Taskcluster, history *taskDefHistory, rebas
 	// idempotent only for an identical (taskId, definition) pair, so the
 	// resolved id and finalized definition are memoized and reused as long as
 	// the input text is unchanged: a retry re-submits byte-for-byte rather
-	// than minting a new id or re-rebasing timestamps to a later "now". Editing
-	// the definition invalidates the memo, making it a genuinely new task.
+	// than minting a new id. Editing the definition invalidates the memo,
+	// making it a genuinely new task.
 	var (
 		submittedRaw  string
 		submittedID   string
@@ -169,20 +159,27 @@ func createTaskAction(tc taskcluster.Taskcluster, history *taskDefHistory, rebas
 	)
 
 	return Action{
-		Key:          key,
-		Label:        label,
-		Prompt:       prompt,
-		Input:        InputYAML,
-		InputLabel:   "task definition",
-		InitialText:  initial,
-		InputHistory: hist,
+		Key:         createTaskKey,
+		Label:       "create task",
+		Prompt:      prompt,
+		Input:       InputExternalEditor,
+		InputLabel:  "task definition",
+		InitialText: initial,
+		Transforms: []BufferTransform{{
+			Key:   'u',
+			Label: "update timestamps",
+			Apply: func(raw string) (string, error) { return updateTaskTimestamps(raw, time.Now()) },
+		}},
 		Validate: func(in ActionInput) error {
-			_, err := buildTaskDefinition(in.Raw, time.Now(), rebase)
-			return err
+			bt, err := buildTaskDefinition(in.Raw, time.Now(), false)
+			if err != nil {
+				return err
+			}
+			return validateTaskTiming(bt.def, time.Now())
 		},
 		Perform: func(in ActionInput) error {
 			if submittedBody == nil || in.Raw != submittedRaw {
-				bt, err := buildTaskDefinition(in.Raw, time.Now(), rebase)
+				bt, err := buildTaskDefinition(in.Raw, time.Now(), false)
 				if err != nil {
 					return err
 				}
@@ -205,10 +202,42 @@ func createTaskAction(tc taskcluster.Taskcluster, history *taskDefHistory, rebas
 			}
 			return NavTarget{ResourceName: "task", ID: createdTaskID, Kind: NavDetail}, true
 		},
-		// The new task belongs to its own group; any tasks list already
-		// cached (e.g. its task group) should re-fetch to pick it up.
-		Invalidates: []string{"tasks"},
+		// The new task belongs to its own group; any tasks/taskgroup list
+		// already cached (e.g. the group it landed in, if launched from a
+		// different view) should re-fetch to pick it up.
+		Invalidates: []string{"tasks", "taskgroup"},
 	}
+}
+
+// validateTaskTiming enforces the queue's clock-drift constraints (queue
+// createTask's patchAndValidateTaskDef): created must be within 15 minutes of
+// now (either direction), and deadline may not already be in the past. This
+// is deliberately NOT part of buildTaskDefinition/validateTaskDefinition —
+// those are pure structural/schema checks exercised by many tests against
+// fixed historical timestamps (rebasing, ordering, preservation), independent
+// of wall-clock time — but it IS what the create-task action's Validate needs
+// so the confirm screen doesn't show a stale definition (e.g. the starter
+// template, whose timestamps are intentionally old) as green "valid" only for
+// the real queue to reject it: pressing 'u' (updateTaskTimestamps) is what
+// makes it valid again.
+func validateTaskTiming(def *tcqueue.TaskDefinitionRequest, now time.Time) error {
+	const driftAllowance = 15 * time.Minute
+
+	created := time.Time(def.Created)
+	if created.Before(now.Add(-driftAllowance)) {
+		return fmt.Errorf("created %s is too far in the past (max 15min drift) — press 'u' to update timestamps",
+			created.UTC().Format(taskTimeLayout))
+	}
+	if created.After(now.Add(driftAllowance)) {
+		return fmt.Errorf("created %s is too far in the future (max 15min drift) — press 'u' to update timestamps",
+			created.UTC().Format(taskTimeLayout))
+	}
+
+	if deadline := time.Time(def.Deadline); deadline.Before(now) {
+		return fmt.Errorf("deadline %s is in the past — press 'u' to update timestamps",
+			deadline.UTC().Format(taskTimeLayout))
+	}
+	return nil
 }
 
 // builtTask is a validated, ready-to-submit task definition. body is the exact
@@ -236,7 +265,7 @@ type builtTask struct {
 func buildTaskDefinition(raw string, now time.Time, rebase bool) (*builtTask, error) {
 	// YAMLToJSONStrict preserves 64-bit integers (unlike a YAML->interface{}
 	// decode, which would widen them to float64) and rejects duplicate keys.
-	jsonBytes, err := yaml.YAMLToJSONStrict([]byte(raw))
+	jsonBytes, err := yamlconv.YAMLToJSONStrict([]byte(raw))
 	if err != nil {
 		return nil, fmt.Errorf("invalid task definition: %w", err)
 	}
@@ -414,6 +443,118 @@ func setTaskTime(top map[string]json.RawMessage, key string, t time.Time) {
 	// Marshalling a string can't fail.
 	encoded, _ := json.Marshal(t.UTC().Format(taskTimeLayout))
 	top[key] = encoded
+}
+
+// updateTaskTimestamps rebases created/deadline/expires to now. It preserves
+// comments and key order and leaves every other field untouched (including a
+// supplied taskId) — but it is NOT fully format-preserving: the YAML encoder
+// normalizes styling, and JSON input (being valid YAML) is re-emitted as YAML,
+// data intact. created is set to now; if the source had a created value,
+// deadline and expires are shifted by the same delta so their offsets are
+// preserved; otherwise only created is set. A present-but-unparseable
+// created/deadline/expires is a hard error (matching rebaseTaskTimestamps),
+// not silently ignored.
+func updateTaskTimestamps(raw string, now time.Time) (string, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
+		return "", fmt.Errorf("invalid task definition: %w", err)
+	}
+	root := &doc
+	if doc.Kind == yaml.DocumentNode {
+		if len(doc.Content) == 0 {
+			return "", fmt.Errorf("task definition must be a YAML/JSON object")
+		}
+		root = doc.Content[0]
+	}
+	if root.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("task definition must be a YAML/JSON object")
+	}
+
+	valueNode := func(key string) *yaml.Node {
+		for i := 0; i+1 < len(root.Content); i += 2 {
+			if root.Content[i].Value == key {
+				return root.Content[i+1]
+			}
+		}
+		return nil
+	}
+	// setStr mutates an existing value node in place (retaining its Head/Line/
+	// Foot comments) rather than replacing it, or appends the key when absent.
+	setStr := func(key, val string) {
+		if n := valueNode(key); n != nil {
+			n.Kind, n.Tag, n.Value, n.Style = yaml.ScalarNode, "!!str", val, yaml.DoubleQuotedStyle
+			return
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: key},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: val, Style: yaml.DoubleQuotedStyle})
+	}
+	// readTime distinguishes absent (ok=false, no error) from present-invalid
+	// (ok=true, error). Empty string counts as absent, matching readTaskTime.
+	// A non-scalar node (e.g. created: {bad: value}) is present-and-invalid,
+	// not absent — a mapping/sequence node's own Value field is always "",
+	// which would otherwise be indistinguishable from a genuinely absent or
+	// empty-string field and let setStr silently overwrite it instead of
+	// erroring.
+	readTime := func(key string) (time.Time, bool, error) {
+		n := valueNode(key)
+		if n == nil {
+			return time.Time{}, false, nil
+		}
+		if n.Kind != yaml.ScalarNode {
+			return time.Time{}, true, fmt.Errorf("%s is not a valid RFC3339 timestamp", key)
+		}
+		if n.Value == "" {
+			return time.Time{}, false, nil
+		}
+		for _, l := range []string{taskTimeLayout, time.RFC3339Nano, time.RFC3339} {
+			if t, err := time.Parse(l, n.Value); err == nil {
+				return t, true, nil
+			}
+		}
+		return time.Time{}, true, fmt.Errorf("%s is not a valid RFC3339 timestamp: %q", key, n.Value)
+	}
+
+	// Read (and validate) all three up front, so a present-invalid deadline or
+	// expires errors even when there is no created to key a shift off.
+	created, hadCreated, err := readTime("created")
+	if err != nil {
+		return "", err
+	}
+	deadline, hasDeadline, err := readTime("deadline")
+	if err != nil {
+		return "", err
+	}
+	expires, hasExpires, err := readTime("expires")
+	if err != nil {
+		return "", err
+	}
+
+	setStr("created", now.UTC().Format(taskTimeLayout))
+	if hadCreated {
+		delta := now.Sub(created)
+		if hasDeadline {
+			setStr("deadline", deadline.Add(delta).UTC().Format(taskTimeLayout))
+		}
+		if hasExpires {
+			setStr("expires", expires.Add(delta).UTC().Format(taskTimeLayout))
+		}
+	}
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	// Encode &doc (the original document node), not root: a comment with
+	// nothing following it (the last line of the file) is attached by the
+	// parser as the DOCUMENT's FootComment, not the mapping node's — encoding
+	// root alone would silently drop it. root's Content is doc.Content[0]
+	// itself (mutated in place above), so this still emits every rewritten
+	// field.
+	if err := enc.Encode(&doc); err != nil {
+		return "", fmt.Errorf("re-encode task definition: %w", err)
+	}
+	enc.Close()
+	return buf.String(), nil
 }
 
 // Field syntaxes from the queue's create-task schema, used to reject a

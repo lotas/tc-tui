@@ -28,10 +28,17 @@ const (
 	// InputJSON collects multi-line JSON, parsed and structurally validated
 	// before Perform runs. ActionInput.Value carries the parsed structure.
 	InputJSON
+	// InputExternalEditor collects its value by handing the user off to
+	// $EDITOR (k9s-style) rather than an in-TUI field — the shell owns the
+	// handoff and renders a dedicated read-only confirm screen instead of the
+	// ActionView form. ActionInput.Raw carries the buffer verbatim; there is
+	// no structural parse (an action's own Validate does that).
+	InputExternalEditor
 )
 
 // Multiline reports whether mode is collected in a multi-line text area
-// rather than a single-line input field.
+// rather than a single-line input field. InputExternalEditor is deliberately
+// excluded — it is not an in-TUI text area at all.
 func (m InputMode) Multiline() bool {
 	return m == InputText || m == InputYAML || m == InputJSON
 }
@@ -97,6 +104,12 @@ type Action struct {
 	// action with an Input requires a non-empty value.
 	OptionalInput bool
 
+	// Transforms are named, on-demand rewrites offered on the
+	// InputExternalEditor confirm screen (e.g. "update timestamps") — each is
+	// bound to a key the confirm view dispatches, applying the rewrite to the
+	// current buffer and re-validating. Ignored for any other Input mode.
+	Transforms []BufferTransform
+
 	// Validate optionally checks the parsed input beyond structural
 	// well-formedness — required fields, value ranges, schema conformance. It
 	// runs only after a successful parse (so an InputYAML/InputJSON Validate
@@ -125,6 +138,26 @@ type Action struct {
 	// Perform typically stashes the new entity's id in a captured variable
 	// that Next then reads, so a fresh Action must be built per dialog.
 	Next func() (NavTarget, bool)
+}
+
+// CommandAction is implemented by a resource with no list/detail view of its
+// own that instead runs a single action immediately when invoked from the
+// command bar (e.g. `:createtask`). The shell dispatches CommandAction()
+// rather than rendering a List.
+type CommandAction interface {
+	Resource
+	CommandAction() Action
+}
+
+// BufferTransform is a named, on-demand rewrite of an InputExternalEditor
+// action's current buffer, offered as a hotkey on the confirm screen (e.g.
+// "update timestamps" rebasing a stale task definition's created/deadline/
+// expires to now). Apply returns the rewritten buffer, or an error to show
+// instead of applying it.
+type BufferTransform struct {
+	Key   rune
+	Label string
+	Apply func(raw string) (string, error)
 }
 
 // Actionable is implemented by a Resource that exposes mutating,
@@ -176,6 +209,8 @@ func ParseActionInput(mode InputMode, raw string, required bool) (ActionInput, e
 			return input, fmt.Errorf("invalid YAML: %w", err)
 		}
 		input.Value = v
+	case InputExternalEditor:
+		return input, nil
 	default:
 		return input, fmt.Errorf("unknown input mode")
 	}

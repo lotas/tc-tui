@@ -51,20 +51,17 @@ type TasksResource struct {
 	history *taskDefHistory
 }
 
-func NewTasksResource(tc taskcluster.Taskcluster) *TasksResource {
-	return &TasksResource{tc: tc, history: &taskDefHistory{}}
+func NewTasksResource(tc taskcluster.Taskcluster, history *taskDefHistory) *TasksResource {
+	return &TasksResource{tc: tc, history: history}
 }
 
-// Actions exposes the create-task actions on the tasks view (resource.Actionable):
-// one that rebases created/deadline/expires to now, and one that submits them
-// as written. They ignore id — creating a task doesn't act on the highlighted
-// row — so they are available from any tasks list. The returned Actions are
-// fresh each call, carrying their own per-dialog state (see createTaskAction).
+// Actions exposes the create-task action on the tasks view
+// (resource.Actionable). It ignores id — creating a task doesn't act on the
+// highlighted row — so it's available from any tasks list. The returned
+// Action is fresh each call, carrying its own per-dialog state (see
+// createTaskAction).
 func (r *TasksResource) Actions(id string) []Action {
-	return []Action{
-		createTaskAction(r.tc, r.history, true),
-		createTaskAction(r.tc, r.history, false),
-	}
+	return []Action{createTaskAction(r.tc, r.history)}
 }
 
 func (r *TasksResource) Name() string      { return "tasks" }

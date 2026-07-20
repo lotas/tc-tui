@@ -240,7 +240,7 @@ func TestTasksResourceScopedList(t *testing.T) {
 			},
 		},
 	}
-	res := NewTasksResource(fake)
+	res := NewTasksResource(fake, &taskDefHistory{})
 
 	rows, err := res.ScopedList("grp-1")
 	if err != nil {
@@ -264,7 +264,7 @@ func TestTasksResourceScopedList(t *testing.T) {
 func TestTasksResourceScopedListError(t *testing.T) {
 	wantErr := errors.New("boom")
 	fake := &fakeTaskcluster{taskGroupTasksErr: wantErr}
-	res := NewTasksResource(fake)
+	res := NewTasksResource(fake, &taskDefHistory{})
 
 	_, err := res.ScopedList("grp-1")
 	if !errors.Is(err, wantErr) {
@@ -273,7 +273,7 @@ func TestTasksResourceScopedListError(t *testing.T) {
 }
 
 func TestTasksResourceListReturnsError(t *testing.T) {
-	res := NewTasksResource(&fakeTaskcluster{})
+	res := NewTasksResource(&fakeTaskcluster{}, &taskDefHistory{})
 
 	if _, err := res.List(); err == nil {
 		t.Fatalf("expected an error, got nil")
@@ -281,7 +281,7 @@ func TestTasksResourceListReturnsError(t *testing.T) {
 }
 
 func TestTasksResourceEmptyScopeResource(t *testing.T) {
-	res := NewTasksResource(&fakeTaskcluster{})
+	res := NewTasksResource(&fakeTaskcluster{}, &taskDefHistory{})
 
 	if got := res.EmptyScopeResource(); got != "workerpools" {
 		t.Fatalf("expected %q, got %q", "workerpools", got)
@@ -459,7 +459,7 @@ func TestTasksResourceDescribeDelegatesToDescribeTask(t *testing.T) {
 		task:       &tcqueue.TaskDefinitionResponse{Metadata: tcqueue.TaskMetadata{Name: "build"}},
 		taskStatus: &tcqueue.TaskStatusStructure{State: "completed"},
 	}
-	res := NewTasksResource(fake)
+	res := NewTasksResource(fake, &taskDefHistory{})
 
 	detail, err := res.Describe("task-1")
 	if err != nil {

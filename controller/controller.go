@@ -46,9 +46,11 @@ func buildRegistry(tc taskcluster.Taskcluster) *resource.Registry {
 	registry.Register(resource.NewWorkerRecentTasksResource(tc))
 	registry.Register(resource.NewLaunchConfigsResource(tc))
 	registry.Register(resource.NewErrorsResource(tc))
+	taskHistory := resource.NewTaskDefHistory()
 	registry.Register(resource.NewTaskResource(tc))
-	registry.Register(resource.NewTaskGroupResource(tc))
-	registry.Register(resource.NewTasksResource(tc))
+	registry.Register(resource.NewTaskGroupResource(tc, taskHistory))
+	registry.Register(resource.NewTasksResource(tc, taskHistory))
+	registry.Register(resource.NewCreateTaskResource(tc, taskHistory))
 	registry.Register(resource.NewTaskDependenciesResource(tc))
 	registry.Register(resource.NewTaskDependentsResource(tc))
 	registry.Register(resource.NewTaskRunsResource(tc))
@@ -95,7 +97,7 @@ func (c *Controller) StartUI() error {
 }
 
 func (c *Controller) StartUIAt(name, scope string) error {
-	return c.run(func() error { return c.shell.StartAt(name, scope) })
+	return c.run(func() error { return c.shell.StartAt(rootResource, name, scope) })
 }
 
 // run wires up header info and persists navigation state around whichever

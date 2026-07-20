@@ -29,6 +29,29 @@ metadata:
   source: https://example.com
 `
 
+// freshTaskDef returns a sampleTaskDef-shaped definition anchored to now —
+// used wherever a test exercises createTaskAction.Validate, which (unlike
+// buildTaskDefinition's own structural checks) also enforces the queue's
+// clock-drift constraints via validateTaskTiming. sampleTaskDef's fixed 2020
+// dates stay fixed everywhere else: they're what the many schema/ordering/
+// rebase tests below are actually about, independent of wall-clock time.
+func freshTaskDef(now time.Time) string {
+	return "\n" +
+		"provisionerId: proj-taskcluster\n" +
+		"workerType: gw-ci\n" +
+		"created: \"" + now.UTC().Format(taskTimeLayout) + "\"\n" +
+		"deadline: \"" + now.Add(time.Hour).UTC().Format(taskTimeLayout) + "\"\n" +
+		"expires: \"" + now.AddDate(0, 0, 31).UTC().Format(taskTimeLayout) + "\"\n" +
+		"payload:\n" +
+		"  command: [echo, hi]\n" +
+		"  maxRunTime: 600\n" +
+		"metadata:\n" +
+		"  name: hello\n" +
+		"  description: a hello task\n" +
+		"  owner: me@example.com\n" +
+		"  source: https://example.com\n"
+}
+
 // build is a test helper that returns the supplied/parsed taskId and the error.
 func build(t *testing.T, raw string, now time.Time, rebase bool) (string, error) {
 	t.Helper()
@@ -377,7 +400,7 @@ func TestBuildTaskDefinitionEnforcesSchema(t *testing.T) {
 		"unknown metadata key": {true, func(m map[string]interface{}) {
 			meta(m)["Source"] = "https://example.com" // case variant of source
 		}, "metadata field"},
-		"invalid requires":     {true, func(m map[string]interface{}) { m["requires"] = "bogus" }, "requires"},
+		"invalid requires": {true, func(m map[string]interface{}) { m["requires"] = "bogus" }, "requires"},
 		// Explicit empty/null values collapse to the same Go zero value as an
 		// omitted field, but the queue rejects them (they are not enum members /
 		// violate the field's pattern), so presence-gated checks must catch them.
@@ -390,28 +413,28 @@ func TestBuildTaskDefinitionEnforcesSchema(t *testing.T) {
 		// Explicit null for an array/object field is a type violation the queue
 		// rejects; it decodes to the same nil as omission, so it is caught on the
 		// raw definition.
-		"null dependencies":   {true, func(m map[string]interface{}) { m["dependencies"] = nil }, "dependencies may not be null"},
-		"null routes":         {true, func(m map[string]interface{}) { m["routes"] = nil }, "routes may not be null"},
-		"null scopes":         {true, func(m map[string]interface{}) { m["scopes"] = nil }, "scopes may not be null"},
-		"null tags":           {true, func(m map[string]interface{}) { m["tags"] = nil }, "tags may not be null"},
-		"null extra":          {true, func(m map[string]interface{}) { m["extra"] = nil }, "extra may not be null"},
-		"null retries":        {true, func(m map[string]interface{}) { m["retries"] = nil }, "retries may not be null"},
-		"null provisionerId":  {true, func(m map[string]interface{}) { m["provisionerId"] = nil }, "provisionerId may not be null"},
-		"null taskQueueId":    {true, func(m map[string]interface{}) { m["taskQueueId"] = nil }, "taskQueueId may not be null"},
-		"null tag value":      {true, func(m map[string]interface{}) { m["tags"] = map[string]interface{}{"x": nil} }, "tags.x may not be null"},
-		"null scope item":     {true, func(m map[string]interface{}) { m["scopes"] = []interface{}{nil} }, "scopes[0] may not be null"},
-		"null metadata name":  {true, func(m map[string]interface{}) { meta(m)["name"] = nil }, "metadata.name must be a string"},
-		"null metadata owner": {true, func(m map[string]interface{}) { meta(m)["owner"] = nil }, "metadata.owner must be a string"},
+		"null dependencies":               {true, func(m map[string]interface{}) { m["dependencies"] = nil }, "dependencies may not be null"},
+		"null routes":                     {true, func(m map[string]interface{}) { m["routes"] = nil }, "routes may not be null"},
+		"null scopes":                     {true, func(m map[string]interface{}) { m["scopes"] = nil }, "scopes may not be null"},
+		"null tags":                       {true, func(m map[string]interface{}) { m["tags"] = nil }, "tags may not be null"},
+		"null extra":                      {true, func(m map[string]interface{}) { m["extra"] = nil }, "extra may not be null"},
+		"null retries":                    {true, func(m map[string]interface{}) { m["retries"] = nil }, "retries may not be null"},
+		"null provisionerId":              {true, func(m map[string]interface{}) { m["provisionerId"] = nil }, "provisionerId may not be null"},
+		"null taskQueueId":                {true, func(m map[string]interface{}) { m["taskQueueId"] = nil }, "taskQueueId may not be null"},
+		"null tag value":                  {true, func(m map[string]interface{}) { m["tags"] = map[string]interface{}{"x": nil} }, "tags.x may not be null"},
+		"null scope item":                 {true, func(m map[string]interface{}) { m["scopes"] = []interface{}{nil} }, "scopes[0] may not be null"},
+		"null metadata name":              {true, func(m map[string]interface{}) { meta(m)["name"] = nil }, "metadata.name must be a string"},
+		"null metadata owner":             {true, func(m map[string]interface{}) { meta(m)["owner"] = nil }, "metadata.owner must be a string"},
 		"non-string metadata description": {true, func(m map[string]interface{}) { meta(m)["description"] = 5 }, "metadata.description must be a string"},
-		"non-object extra":     {true, func(m map[string]interface{}) { m["extra"] = "nope" }, "extra must be an object"},
-		"empty projectId":      {true, func(m map[string]interface{}) { m["projectId"] = "" }, "projectId"},
-		"malformed projectId":  {true, func(m map[string]interface{}) { m["projectId"] = "bad project!" }, "projectId"},
-		"malformed source":     {true, func(m map[string]interface{}) { meta(m)["source"] = "not-a-url" }, "metadata.source"},
-		"oversized name":       {true, func(m map[string]interface{}) { meta(m)["name"] = strings.Repeat("x", 256) }, "metadata.name"},
-		"empty route":          {true, func(m map[string]interface{}) { m["routes"] = []string{""} }, "route"},
-		"non-ascii scope":      {true, func(m map[string]interface{}) { m["scopes"] = []string{"scope:\x01"} }, "scope"},
-		"trailing double star": {true, func(m map[string]interface{}) { m["scopes"] = []string{"foo:**"} }, "may not end"},
-		"malformed source url": {true, func(m map[string]interface{}) { meta(m)["source"] = "https://[" }, "not a valid URL"},
+		"non-object extra":                {true, func(m map[string]interface{}) { m["extra"] = "nope" }, "extra must be an object"},
+		"empty projectId":                 {true, func(m map[string]interface{}) { m["projectId"] = "" }, "projectId"},
+		"malformed projectId":             {true, func(m map[string]interface{}) { m["projectId"] = "bad project!" }, "projectId"},
+		"malformed source":                {true, func(m map[string]interface{}) { meta(m)["source"] = "not-a-url" }, "metadata.source"},
+		"oversized name":                  {true, func(m map[string]interface{}) { meta(m)["name"] = strings.Repeat("x", 256) }, "metadata.name"},
+		"empty route":                     {true, func(m map[string]interface{}) { m["routes"] = []string{""} }, "route"},
+		"non-ascii scope":                 {true, func(m map[string]interface{}) { m["scopes"] = []string{"scope:\x01"} }, "scope"},
+		"trailing double star":            {true, func(m map[string]interface{}) { m["scopes"] = []string{"foo:**"} }, "may not end"},
+		"malformed source url":            {true, func(m map[string]interface{}) { meta(m)["source"] = "https://[" }, "not a valid URL"},
 		"too many routes": {true, func(m map[string]interface{}) {
 			routes := make([]string, 65)
 			for i := range routes {
@@ -527,9 +550,101 @@ func TestBuildTaskDefinitionRejectsNullDocuments(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskTimestampsPreservesTaskIdCommentsAndShiftsOffsets(t *testing.T) {
+	id := slugid.Nice()
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	// Build from the known-valid sampleTaskDef (complete: provisionerId,
+	// workerType, payload, metadata) so buildTaskDefinition passes; prepend a
+	// taskId and a standalone comment, and add an inline comment on created.
+	raw := "taskId: " + id + "\n# keep me\n" +
+		strings.Replace(sampleTaskDef,
+			`created: "2020-01-01T00:00:00.000Z"`,
+			`created: "2020-01-01T00:00:00.000Z" # birth`, 1)
+
+	out, err := updateTaskTimestamps(raw, now)
+	if err != nil {
+		t.Fatalf("updateTaskTimestamps: %v", err)
+	}
+	if !strings.Contains(out, id) {
+		t.Fatal("dropped the supplied taskId")
+	}
+	if !strings.Contains(out, "keep me") || !strings.Contains(out, "birth") {
+		t.Fatalf("dropped a comment:\n%s", out)
+	}
+	// created -> now; deadline keeps its +1h offset (from sampleTaskDef).
+	bt, err := buildTaskDefinition(out, now, false)
+	if err != nil {
+		t.Fatalf("rebased def should validate: %v", err)
+	}
+	if !time.Time(bt.def.Created).Equal(now) {
+		t.Fatalf("created = %s, want now", time.Time(bt.def.Created))
+	}
+	if !time.Time(bt.def.Deadline).Equal(now.Add(time.Hour)) {
+		t.Fatalf("deadline offset not preserved: %s", time.Time(bt.def.Deadline))
+	}
+}
+
+func TestUpdateTaskTimestampsSetsCreatedWhenAbsent(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	raw := "deadline: \"2030-01-01T00:00:00.000Z\"\npayload: {}\n"
+	out, err := updateTaskTimestamps(raw, now)
+	if err != nil || !strings.Contains(out, "created:") {
+		t.Fatalf("want created added, got %q err=%v", out, err)
+	}
+}
+
+func TestUpdateTaskTimestampsPreservesTrailingDocumentComment(t *testing.T) {
+	// A comment with nothing after it (the last line of the file) is
+	// attached by the parser as the DOCUMENT's FootComment, not any field's —
+	// a distinct case from the taskId/inline comments the other test covers.
+	raw := sampleTaskDef + "\n# trailing comment\n"
+	out, err := updateTaskTimestamps(raw, time.Now())
+	if err != nil {
+		t.Fatalf("updateTaskTimestamps: %v", err)
+	}
+	if !strings.Contains(out, "trailing comment") {
+		t.Fatalf("dropped the trailing document comment:\n%s", out)
+	}
+}
+
+func TestUpdateTaskTimestampsErrorsOnPresentInvalidTimestamp(t *testing.T) {
+	// A present-but-unparseable timestamp is a hard error, not silently
+	// treated as absent (which would leave deadline/expires unshifted). Matches
+	// rebaseTaskTimestamps.
+	raw := strings.Replace(sampleTaskDef,
+		`created: "2020-01-01T00:00:00.000Z"`, `created: nonsense`, 1)
+	if _, err := updateTaskTimestamps(raw, time.Now()); err == nil || !strings.Contains(err.Error(), "created") {
+		t.Fatalf("want a created-timestamp error, got %v", err)
+	}
+}
+
+func TestUpdateTaskTimestampsErrorsOnNonScalarTimestamp(t *testing.T) {
+	// A mapping/sequence node's own Value field is always "", the same as a
+	// genuinely absent field — without an explicit Kind check this silently
+	// overwrites the malformed node instead of erroring as promised.
+	raw := strings.Replace(sampleTaskDef,
+		`created: "2020-01-01T00:00:00.000Z"`, "created:\n  bad: value", 1)
+	if _, err := updateTaskTimestamps(raw, time.Now()); err == nil || !strings.Contains(err.Error(), "created") {
+		t.Fatalf("want a created-timestamp error for a non-scalar node, got %v", err)
+	}
+}
+
+func TestTasksAndTaskGroupShareHistory(t *testing.T) {
+	h := &taskDefHistory{}
+	tasks := NewTasksResource(&fakeTaskcluster{}, h)
+	group := NewTaskGroupResource(&fakeTaskcluster{}, h)
+	h.add("shared def")
+	if a := tasks.Actions(""); a[0].InitialText != "shared def" {
+		t.Fatalf("tasks action did not seed from shared history: %q", a[0].InitialText)
+	}
+	if a := group.Actions(""); a[0].InitialText != "shared def" {
+		t.Fatalf("taskgroup action did not seed from shared history: %q", a[0].InitialText)
+	}
+}
+
 func TestCreateTaskActionRetryIsIdempotent(t *testing.T) {
 	tc := &fakeTaskcluster{createTaskErr: fmt.Errorf("transport blip")}
-	action := createTaskAction(tc, &taskDefHistory{}, true)
+	action := createTaskAction(tc, &taskDefHistory{})
 	in, err := ParseActionInput(action.Input, sampleTaskDef, true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -562,7 +677,7 @@ func TestCreateTaskActionRetryIsIdempotent(t *testing.T) {
 
 func TestCreateTaskActionRebuildsWhenInputChanges(t *testing.T) {
 	tc := &fakeTaskcluster{}
-	action := createTaskAction(tc, &taskDefHistory{}, true)
+	action := createTaskAction(tc, &taskDefHistory{})
 
 	in1, _ := ParseActionInput(action.Input, sampleTaskDef, true)
 	if err := action.Perform(in1); err != nil {
@@ -670,14 +785,17 @@ func TestCreateTaskActionSubmitsAndNavigates(t *testing.T) {
 		createTaskResp: nil, // a nil response with nil error is success
 	}
 	history := &taskDefHistory{}
-	action := createTaskAction(tc, history, true)
+	action := createTaskAction(tc, history)
 
 	if action.Key != createTaskKey {
 		t.Fatalf("action key = %q, want %q", action.Key, createTaskKey)
 	}
 
-	// Validation passes for a good definition.
-	in, err := ParseActionInput(action.Input, sampleTaskDef, true)
+	// Validation passes for a good, timely definition (validateTaskTiming
+	// requires created within 15min of now — sampleTaskDef's fixed 2020 dates
+	// would fail it; see freshTaskDef).
+	raw := freshTaskDef(time.Now())
+	in, err := ParseActionInput(action.Input, raw, true)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -713,15 +831,56 @@ func TestCreateTaskActionSubmitsAndNavigates(t *testing.T) {
 	}
 
 	// The submitted definition is retained for reuse.
-	if got, ok := history.latest(); !ok || got != sampleTaskDef {
+	if got, ok := history.latest(); !ok || got != raw {
 		t.Fatalf("submitted definition was not retained, latest=%q ok=%v", got, ok)
+	}
+}
+
+func TestCreateTaskActionValidateRejectsStaleTimestampsUntilRebased(t *testing.T) {
+	// The starter template (and any reused stale definition) must not show as
+	// "valid" until its timestamps are actually current — the real queue
+	// enforces a 15min created drift and rejects a past deadline. Confirms the
+	// exact review scenario: sampleTaskDef's fixed 2020 dates fail Validate,
+	// and applying the "update timestamps" transform fixes it.
+	action := createTaskAction(&fakeTaskcluster{}, &taskDefHistory{})
+	in, err := ParseActionInput(action.Input, sampleTaskDef, true)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := action.Validate(in); err == nil {
+		t.Fatal("Validate should reject a definition with a 2020 created/deadline")
+	}
+
+	rebased, err := updateTaskTimestamps(sampleTaskDef, time.Now())
+	if err != nil {
+		t.Fatalf("updateTaskTimestamps: %v", err)
+	}
+	in2, err := ParseActionInput(action.Input, rebased, true)
+	if err != nil {
+		t.Fatalf("parse rebased: %v", err)
+	}
+	if err := action.Validate(in2); err != nil {
+		t.Fatalf("Validate rejected a rebased (now-current) definition: %v", err)
+	}
+}
+
+func TestCreateTaskActionInvalidatesTaskgroupToo(t *testing.T) {
+	action := createTaskAction(&fakeTaskcluster{}, &taskDefHistory{})
+	want := map[string]bool{"tasks": true, "taskgroup": true}
+	if len(action.Invalidates) != len(want) {
+		t.Fatalf("Invalidates = %v, want %v", action.Invalidates, want)
+	}
+	for _, name := range action.Invalidates {
+		if !want[name] {
+			t.Fatalf("Invalidates = %v, unexpected entry %q", action.Invalidates, name)
+		}
 	}
 }
 
 func TestCreateTaskActionUsesSuppliedTaskID(t *testing.T) {
 	id := slugid.Nice()
 	tc := &fakeTaskcluster{}
-	action := createTaskAction(tc, &taskDefHistory{}, true)
+	action := createTaskAction(tc, &taskDefHistory{})
 
 	in, err := ParseActionInput(action.Input, "taskId: "+id+"\n"+sampleTaskDef, true)
 	if err != nil {
@@ -737,8 +896,12 @@ func TestCreateTaskActionUsesSuppliedTaskID(t *testing.T) {
 
 func TestCreateTaskActionInitialTextAndHistory(t *testing.T) {
 	history := &taskDefHistory{}
-	// With no history the template is offered and there is nothing to cycle.
-	a := createTaskAction(&fakeTaskcluster{}, history, true)
+	// With no history the template is offered; the editor's Edit Again covers
+	// reuse, so InputHistory is never populated.
+	a := createTaskAction(&fakeTaskcluster{}, history)
+	if a.Input != InputExternalEditor {
+		t.Fatalf("Input = %v, want InputExternalEditor", a.Input)
+	}
 	if a.InitialText != createTaskTemplate {
 		t.Fatalf("InitialText = %q, want template", a.InitialText)
 	}
@@ -746,16 +909,15 @@ func TestCreateTaskActionInitialTextAndHistory(t *testing.T) {
 		t.Fatalf("InputHistory = %v, want empty", a.InputHistory)
 	}
 
-	// Once definitions are retained, the newest prefills and all are offered
-	// for cycling, newest first.
+	// Once a definition is retained, the newest seeds InitialText.
 	history.add("older")
 	history.add(sampleTaskDef)
-	a = createTaskAction(&fakeTaskcluster{}, history, true)
+	a = createTaskAction(&fakeTaskcluster{}, history)
 	if a.InitialText != sampleTaskDef {
 		t.Fatalf("InitialText = %q, want newest retained definition", a.InitialText)
 	}
-	if len(a.InputHistory) != 2 || a.InputHistory[0] != sampleTaskDef || a.InputHistory[1] != "older" {
-		t.Fatalf("InputHistory = %v, want [newest, older]", a.InputHistory)
+	if len(a.InputHistory) != 0 {
+		t.Fatalf("InputHistory = %v, want empty even with retained history", a.InputHistory)
 	}
 }
 
@@ -766,28 +928,26 @@ func TestCreateTaskTemplateIsValid(t *testing.T) {
 }
 
 func TestTasksResourceExposesCreateActions(t *testing.T) {
-	r := NewTasksResource(&fakeTaskcluster{})
+	r := NewTasksResource(&fakeTaskcluster{}, &taskDefHistory{})
 	actions := r.Actions("")
-	if len(actions) != 2 {
-		t.Fatalf("Actions = %+v, want two create-task variants", actions)
+	if len(actions) != 1 {
+		t.Fatalf("Actions = %+v, want a single create-task action", actions)
 	}
-	if actions[0].Key != createTaskKey || actions[1].Key != createTaskKeepKey {
-		t.Fatalf("action keys = %q/%q, want %q/%q",
-			actions[0].Key, actions[1].Key, createTaskKey, createTaskKeepKey)
+	if actions[0].Key != createTaskKey {
+		t.Fatalf("action key = %q, want %q", actions[0].Key, createTaskKey)
 	}
 }
 
 func TestTaskGroupResourceExposesCreateActions(t *testing.T) {
 	// The taskgroup list (`:g <id>`, or a task's 'g' jump) is the natural,
-	// directly reachable place to create a task, so it exposes the same pair.
-	r := NewTaskGroupResource(&fakeTaskcluster{})
+	// directly reachable place to create a task, so it exposes the same action.
+	r := NewTaskGroupResource(&fakeTaskcluster{}, &taskDefHistory{})
 	actions := r.Actions("")
-	if len(actions) != 2 {
-		t.Fatalf("Actions = %+v, want two create-task variants", actions)
+	if len(actions) != 1 {
+		t.Fatalf("Actions = %+v, want a single create-task action", actions)
 	}
-	if actions[0].Key != createTaskKey || actions[1].Key != createTaskKeepKey {
-		t.Fatalf("action keys = %q/%q, want %q/%q",
-			actions[0].Key, actions[1].Key, createTaskKey, createTaskKeepKey)
+	if actions[0].Key != createTaskKey {
+		t.Fatalf("action key = %q, want %q", actions[0].Key, createTaskKey)
 	}
 }
 

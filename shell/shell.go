@@ -11,11 +11,12 @@ import (
 )
 
 const (
-	pageTable  = "table"
-	pageDetail = "detail"
-	pageError  = "error"
-	pageHelp   = "help"
-	pageAction = "action"
+	pageTable         = "table"
+	pageDetail        = "detail"
+	pageError         = "error"
+	pageHelp          = "help"
+	pageAction        = "action"
+	pageEditorConfirm = "editorConfirm"
 
 	pageFooterBreadcrumb = "breadcrumb"
 	pageFooterInput      = "input"
@@ -57,12 +58,13 @@ type Shell struct {
 	headerLeft *tview.TextView
 	headerHint *tview.TextView
 
-	content    *tview.Pages
-	table      *TableView
-	detail     *DetailView
-	errorView  *ErrorView
-	helpView   *HelpView
-	actionView *ActionView
+	content       *tview.Pages
+	table         *TableView
+	detail        *DetailView
+	errorView     *ErrorView
+	helpView      *HelpView
+	actionView    *ActionView
+	editorConfirm *EditorConfirmView
 
 	helpOpen    bool
 	preHelpPage string
@@ -80,6 +82,11 @@ type Shell struct {
 	actionReturnPage string
 	// currentAction is the action the open dialog is collecting input for.
 	currentAction resource.Action
+
+	// openInEditor is a seam over the package-level editInEditor so tests can
+	// simulate an $EDITOR round trip (success, failure, or an unavailable
+	// screen) without shelling out or suspending a real terminal.
+	openInEditor func(seed string) (string, error)
 
 	footer              *tview.Pages
 	footerBreadcrumb    *tview.TextView
@@ -317,13 +324,16 @@ func (s *Shell) init() {
 	s.errorView = NewErrorView()
 	s.helpView = NewHelpView()
 	s.actionView = NewActionView()
+	s.editorConfirm = NewEditorConfirmView()
+	s.openInEditor = func(seed string) (string, error) { return editInEditor(s.app, seed) }
 
 	s.content = tview.NewPages().
 		AddPage(pageTable, s.tableContainer, true, true).
 		AddPage(pageDetail, s.detail, true, false).
 		AddPage(pageError, s.errorView, true, false).
 		AddPage(pageHelp, s.helpView, true, false).
-		AddPage(pageAction, s.actionView, true, false)
+		AddPage(pageAction, s.actionView, true, false).
+		AddPage(pageEditorConfirm, s.editorConfirm, true, false)
 	s.content.SetBorder(true)
 	s.activeContent = s.table
 
@@ -550,9 +560,21 @@ func (s *Shell) Start(rootResource string) error {
 // StartAt behaves like Start, but jumps straight to name/scope (resolved the
 // same way as the `:` command bar — see switchResource) instead of restored
 // state or a fallback root resource, discarding any restored navigation
-// stack. Used when the CLI is given a positional resource argument.
-func (s *Shell) StartAt(name, scope string) error {
-	s.switchResource(name, scope)
+// stack. Used when the CLI is given a positional resource argument. root
+// seeds the fallback the command-action cold-start guard renders underneath a
+// command-only target (see switchResource), so cancelling or a failed editor
+// launch returns to a usable screen instead of a blank one.
+//
+// The initial dispatch is queued from a separate goroutine (via
+// QueueUpdateDraw) rather than called synchronously here, so it lands on the
+// event-loop goroutine once Run() is draining updates rather than racing
+// ahead of it — required because a command-only resource (:createtask)
+// suspends to $EDITOR, which no-ops before the screen exists. Calling
+// QueueUpdate synchronously on this goroutine (the same one about to call
+// Run()) would deadlock instead.
+func (s *Shell) StartAt(root, name, scope string) error {
+	s.restoreFallback = root
+	go s.app.QueueUpdateDraw(func() { s.switchResource(name, scope) })
 	return s.app.Run()
 }
 

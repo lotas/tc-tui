@@ -72,6 +72,21 @@ func (s *Shell) switchResource(nameOrAlias, scope string) {
 		return
 	}
 
+	// A command-only resource (:createtask) has no list/detail view — fire its
+	// single action directly, overlaying whatever screen is showing. On a cold
+	// start (CLI `tc-tui createtask`) there is no view underneath; establish the
+	// root fallback first so cancel or an editor-launch failure returns to a
+	// usable screen, not a blank one. (restoreFallback is set by StartAt/Start;
+	// when empty — e.g. unit tests with a pushed base stack — the guard is a
+	// no-op because Top() already exists.)
+	if ca, isCommand := res.(resource.CommandAction); isCommand {
+		if _, hasBase := s.stack.Top(); !hasBase && s.restoreFallback != "" {
+			s.switchResource(s.restoreFallback, "")
+		}
+		s.startAction(ca.CommandAction())
+		return
+	}
+
 	// res is a plain Resource: no ScopedList, no DirectLookup. A second
 	// argument here can only mean "open this id directly" (e.g. `:workerpools
 	// proj-taskcluster/ci`) — res.List() takes no scope, so there's no scoped

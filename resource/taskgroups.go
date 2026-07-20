@@ -18,20 +18,17 @@ type TaskGroupResource struct {
 	history *taskDefHistory
 }
 
-func NewTaskGroupResource(tc taskcluster.Taskcluster) *TaskGroupResource {
-	return &TaskGroupResource{tc: tc, history: &taskDefHistory{}}
+func NewTaskGroupResource(tc taskcluster.Taskcluster, history *taskDefHistory) *TaskGroupResource {
+	return &TaskGroupResource{tc: tc, history: history}
 }
 
-// Actions exposes the create-task actions on the task-group list
-// (resource.Actionable), the same pair TasksResource offers — the taskgroup
-// list (`:g <id>`, or a task's 'g' jump) is the natural place to create a
-// task, so it shouldn't require knowing the `:tasks <id>` alias. They ignore
-// id — creating a task doesn't act on the highlighted row. See createTaskAction.
+// Actions exposes the same create-task action TasksResource offers
+// (resource.Actionable) — the taskgroup list (`:g <id>`, or a task's 'g'
+// jump) is the natural place to create a task, so it shouldn't require
+// knowing the `:tasks <id>` alias. It ignores id — creating a task doesn't
+// act on the highlighted row. See createTaskAction.
 func (r *TaskGroupResource) Actions(id string) []Action {
-	return []Action{
-		createTaskAction(r.tc, r.history, true),
-		createTaskAction(r.tc, r.history, false),
-	}
+	return []Action{createTaskAction(r.tc, r.history)}
 }
 
 func (r *TaskGroupResource) Name() string      { return "taskgroup" }

@@ -288,6 +288,11 @@ func (s *Shell) startAction(a resource.Action) {
 	s.actionBusy = false
 	s.currentAction = a
 
+	if a.Input == resource.InputExternalEditor {
+		s.startEditorAction(a)
+		return
+	}
+
 	s.actionView.SetAction(a,
 		func() { s.submitAction() },
 		func() { s.closeAction() },
@@ -296,6 +301,58 @@ func (s *Shell) startAction(a resource.Action) {
 	s.content.SwitchToPage(pageAction)
 	s.updateBorderColor()
 	s.app.SetFocus(s.actionView.form)
+}
+
+// startEditorAction/reEdit both funnel into runEditorHandoff — the initial
+// open (seeded from the action's InitialText) and a later "edit again" from
+// the confirm screen (seeded from whatever's currently in the buffer,
+// possibly already rewritten by a transform), respectively.
+func (s *Shell) startEditorAction(a resource.Action)      { s.runEditorHandoff(a, a.InitialText, false) }
+func (s *Shell) reEdit(a resource.Action, current string) { s.runEditorHandoff(a, current, true) }
+
+// runEditorHandoff hands off to $EDITOR via s.openInEditor and, on success,
+// shows the confirm screen. It runs on the event-loop goroutine — an input
+// handler (the `:createtask` command, or the confirm screen's 'e' key) or the
+// queued initial dispatch from StartAt — so s.openInEditor's Suspend call is
+// made directly. Do NOT wrap this in QueueUpdate/Draw: both block on the
+// loop and would deadlock when called from the loop goroutine itself.
+//
+// reedit distinguishes the initial open (a launch failure clears the action,
+// same as any other action-open failure) from a later "edit again" (a launch
+// failure instead keeps the confirm screen open, reporting the error there,
+// so the user doesn't lose the buffer they were about to re-edit).
+func (s *Shell) runEditorHandoff(a resource.Action, seed string, reedit bool) {
+	text, err := s.openInEditor(seed)
+	if err != nil {
+		if reedit {
+			s.editorConfirm.SetStatus(err.Error(), true)
+			return
+		}
+		s.actionOpen = false
+		label := a.Label
+		if label == "" {
+			label = "create task"
+		}
+		s.showTransientWarning(fmt.Sprintf("%s: %s", label, err))
+		return
+	}
+	s.showEditorConfirm(a, text)
+}
+
+// showEditorConfirm renders the read-only, scrollable confirm screen for a's
+// just-edited buffer. It deliberately does NOT touch s.actionReturnPage —
+// that was captured once, in startAction, so an Edit Again round trip through
+// this screen and back still closes to the action's true origin rather than
+// to pageEditorConfirm itself.
+func (s *Shell) showEditorConfirm(a resource.Action, buffer string) {
+	s.editorConfirm.SetContent(a, buffer,
+		func(raw string) { s.performActionInput(a, raw, s.editorConfirm.SetStatus) },
+		func(cur string) { s.reEdit(a, cur) },
+		func() { s.closeAction() },
+	)
+	s.content.SwitchToPage(pageEditorConfirm)
+	s.updateBorderColor()
+	s.app.SetFocus(s.editorConfirm)
 }
 
 // closeAction dismisses the dialog and returns to the page it was launched
@@ -333,27 +390,46 @@ func (s *Shell) submitAction() {
 		}
 	}
 
-	input, err := resource.ParseActionInput(a.Input, s.actionView.InputText(), !a.OptionalInput)
+	s.performActionInput(a, s.actionView.InputText(), s.actionView.SetStatus)
+}
+
+// performFailurePrefix marks a status message as a Perform (not
+// parse/Validate) failure — the only status setStatus ever sends after the
+// dialog/confirm screen has already accepted the input as well-formed and
+// valid. EditorConfirmView.SetStatus keys off this exact prefix to route a
+// Perform failure (which can be an arbitrarily long API error, e.g. an auth
+// failure's full call summary) into its scrollable content pane instead of
+// its 2-row status line — see EditorConfirmView.showPerformFailure.
+const performFailurePrefix = "failed: "
+
+// performActionInput validates raw for a and, if valid, performs it off the UI
+// thread, reporting status via setStatus. Shared by the form dialog and the
+// editor confirm screen so there is one submit path.
+func (s *Shell) performActionInput(a resource.Action, raw string, setStatus func(string, bool)) {
+	if s.actionBusy {
+		return // Perform already in flight; ignore a double activation
+	}
+	input, err := resource.ParseActionInput(a.Input, raw, !a.OptionalInput)
 	if err != nil {
-		s.actionView.SetStatus(err.Error(), true)
+		setStatus(err.Error(), true)
 		return
 	}
 	if a.Validate != nil {
 		if err := a.Validate(input); err != nil {
-			s.actionView.SetStatus(err.Error(), true)
+			setStatus(err.Error(), true)
 			return
 		}
 	}
 
 	s.actionBusy = true
-	s.actionView.SetStatus("Working…", false)
+	setStatus("Working…", false)
 
 	go func() {
 		err := a.Perform(input)
 		s.app.QueueUpdateDraw(func() {
 			s.actionBusy = false
 			if err != nil {
-				s.actionView.SetStatus(fmt.Sprintf("failed: %s", err), true)
+				setStatus(performFailurePrefix+err.Error(), true)
 				return
 			}
 			s.finishAction(a)
