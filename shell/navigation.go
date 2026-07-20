@@ -452,6 +452,14 @@ func (s *Shell) renderList(res resource.Resource, scope string, isRestore bool) 
 	if sa, ok := res.(resource.ScopeActions); ok {
 		s.currentDetailActions = sa.ScopeActions(scope)
 	}
+	// A list view can also carry mutating actions (resource.Actionable) — e.g.
+	// "create task" on the tasks list. They don't act on any single row, so
+	// they're resolved with an empty id purely to render their key hints;
+	// dispatch still re-resolves against the highlighted row at press time.
+	s.currentActions = nil
+	if act, ok := res.(resource.Actionable); ok {
+		s.currentActions = act.Actions("")
+	}
 	s.closeFooterInput()
 	s.filterQuery = s.filterByResource[res.Name()] // "" if never set
 	s.currentListResource = res.Name()

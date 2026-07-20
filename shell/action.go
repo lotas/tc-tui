@@ -42,6 +42,17 @@ type ActionView struct {
 	inputIndex   int
 	confirmIndex int
 
+	// historyItems holds the action's InputHistory (newest first) and
+	// historyIndex tracks which one the multi-line input currently shows, so
+	// Ctrl-P/Ctrl-N can cycle through recently submitted values. historyDrafts
+	// records edits keyed by index so cycling away from a modified buffer and
+	// back restores the edit rather than the pristine history entry — in
+	// particular it preserves the working draft at index 0 (the buffer the
+	// dialog opened with), which a user typically edits before submitting.
+	historyItems  []string
+	historyIndex  int
+	historyDrafts map[int]string
+
 	onSubmit func()
 	onCancel func()
 }
@@ -65,6 +76,9 @@ func (v *ActionView) SetAction(a resource.Action, onSubmit, onCancel func()) {
 	v.onCancel = onCancel
 	v.inputIndex = -1
 	v.confirmIndex = -1
+	v.historyItems = nil
+	v.historyIndex = 0
+	v.historyDrafts = nil
 
 	v.message.SetText(actionMessage(a))
 	v.status.SetText("")
@@ -80,6 +94,22 @@ func (v *ActionView) SetAction(a resource.Action, onSubmit, onCancel func()) {
 		}
 		if a.Input.Multiline() {
 			form.AddTextArea(label, a.InitialText, 0, actionTextAreaHeight, 0, nil)
+			if len(a.InputHistory) > 0 {
+				if ta, ok := form.GetFormItem(next).(*tview.TextArea); ok {
+					v.historyItems = a.InputHistory
+					ta.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+						switch event.Key() {
+						case tcell.KeyCtrlP: // older
+							v.cycleInputHistory(ta, 1)
+							return nil
+						case tcell.KeyCtrlN: // newer
+							v.cycleInputHistory(ta, -1)
+							return nil
+						}
+						return event
+					})
+				}
+			}
 		} else {
 			form.AddInputField(label, a.InitialText, 0, nil, nil)
 		}
@@ -141,6 +171,31 @@ func (v *ActionView) SetAction(a resource.Action, onSubmit, onCancel func()) {
 			AddItem(box, height, 0, true).
 			AddItem(nil, 0, 1, false), width, 0, true).
 		AddItem(nil, 0, 1, false)
+}
+
+// cycleInputHistory replaces the text area with an older (delta +1) or newer
+// (delta -1) entry, staying within bounds. The dialog opens showing
+// historyItems[0] (== InitialText), so the cursor starts at index 0. Before
+// moving, the current buffer is saved as the draft for the index being left, so
+// any edits (including to the opening buffer at index 0) survive a round trip
+// and are restored when the user cycles back rather than being overwritten by
+// the pristine history entry.
+func (v *ActionView) cycleInputHistory(ta *tview.TextArea, delta int) {
+	next := v.historyIndex + delta
+	if next < 0 || next >= len(v.historyItems) {
+		return
+	}
+	if v.historyDrafts == nil {
+		v.historyDrafts = make(map[int]string)
+	}
+	v.historyDrafts[v.historyIndex] = ta.GetText()
+
+	v.historyIndex = next
+	text := v.historyItems[next]
+	if draft, ok := v.historyDrafts[next]; ok {
+		text = draft
+	}
+	ta.SetText(text, true)
 }
 
 // InputText returns the current value-input text, or "" when the action has
@@ -334,6 +389,16 @@ func (s *Shell) finishAction(a resource.Action) {
 	}
 	s.showTransientInfo(fmt.Sprintf("%s: done", label))
 
+	// A create-style action navigates straight to what it just produced (the
+	// new task's detail); its re-render replaces the toast, same as a refresh
+	// would, and the fresh content is the real confirmation.
+	if a.Next != nil {
+		if target, ok := a.Next(); ok {
+			s.navigateTo(target)
+			return
+		}
+	}
+
 	if !a.Destructive {
 		// refreshCurrent re-fetches the top view; the list cache was just
 		// dropped above so a list re-fetches fresh, and a detail always
@@ -357,11 +422,15 @@ func (s *Shell) currentActionTarget() (res resource.Actionable, id string, ok bo
 	if top.Kind == DetailKind {
 		resourceName, entityID = top.ResourceName, top.SelectedID
 	} else {
-		row, rok := s.table.SelectedRow()
-		if !rok {
-			return nil, "", false
+		// The highlighted row's id, when there is one, so a per-row action can
+		// fire straight from a list. An empty/still-loading list has no row —
+		// that's fine for a resource-level action (e.g. create task) that
+		// ignores the id, so resolve the resource with an empty id rather than
+		// making the action unreachable.
+		resourceName = top.ResourceName
+		if row, rok := s.table.SelectedRow(); rok {
+			entityID = row.ID
 		}
-		resourceName, entityID = top.ResourceName, row.ID
 	}
 
 	r, rok := s.registry.Resolve(resourceName)

@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"encoding/json"
 	"regexp"
 
 	"github.com/taskcluster/taskcluster/v101/clients/client-go/tcauth"
@@ -78,6 +79,11 @@ type fakeTaskcluster struct {
 
 	task    *tcqueue.TaskDefinitionResponse
 	taskErr error
+
+	createTaskResp *tcqueue.TaskStatusResponse
+	createTaskErr  error
+	createTaskID   string          // last taskID CreateTask was called with
+	createTaskBody json.RawMessage // last raw definition body CreateTask was called with
 
 	taskStatus    *tcqueue.TaskStatusStructure
 	taskStatusErr error
@@ -235,6 +241,12 @@ func (f *fakeTaskcluster) GetWorkerPoolErrorCount(workerPoolID string) (int, err
 
 func (f *fakeTaskcluster) GetTask(taskID string) (*tcqueue.TaskDefinitionResponse, error) {
 	return f.task, f.taskErr
+}
+
+func (f *fakeTaskcluster) CreateTask(taskID string, body json.RawMessage) (*tcqueue.TaskStatusResponse, error) {
+	f.createTaskID = taskID
+	f.createTaskBody = body
+	return f.createTaskResp, f.createTaskErr
 }
 
 func (f *fakeTaskcluster) GetTaskStatus(taskID string) (*tcqueue.TaskStatusStructure, error) {

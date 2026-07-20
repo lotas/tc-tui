@@ -88,6 +88,11 @@ type Action struct {
 	// InitialText prefills the input field — the current value for an edit, a
 	// template for a create. Ignored when Input is InputNone.
 	InitialText string
+	// InputHistory optionally holds earlier values, newest first, that the
+	// user can cycle back through in a multi-line input (Ctrl-P for older,
+	// Ctrl-N for newer) to reuse or tweak one — e.g. recently submitted task
+	// definitions. Ignored for a single-line or confirm-only action.
+	InputHistory []string
 	// OptionalInput allows the collected value to be left blank. By default an
 	// action with an Input requires a non-empty value.
 	OptionalInput bool
@@ -111,6 +116,15 @@ type Action struct {
 	// launched from is always refreshed regardless; this is for OTHER views
 	// the mutation affects.
 	Invalidates []string
+
+	// Next optionally returns where to navigate after a successful Perform —
+	// e.g. the detail view of a newly created entity. It runs on the UI
+	// thread once caches are invalidated and the dialog is closed; returning
+	// ok=false navigates nowhere and keeps the default behavior (a
+	// non-destructive action refreshes the view it was launched from).
+	// Perform typically stashes the new entity's id in a captured variable
+	// that Next then reads, so a fresh Action must be built per dialog.
+	Next func() (NavTarget, bool)
 }
 
 // Actionable is implemented by a Resource that exposes mutating,

@@ -47,11 +47,24 @@ func (r *TaskResource) DetailWebURL(rootURL, id string) string {
 }
 
 type TasksResource struct {
-	tc taskcluster.Taskcluster
+	tc      taskcluster.Taskcluster
+	history *taskDefHistory
 }
 
 func NewTasksResource(tc taskcluster.Taskcluster) *TasksResource {
-	return &TasksResource{tc: tc}
+	return &TasksResource{tc: tc, history: &taskDefHistory{}}
+}
+
+// Actions exposes the create-task actions on the tasks view (resource.Actionable):
+// one that rebases created/deadline/expires to now, and one that submits them
+// as written. They ignore id — creating a task doesn't act on the highlighted
+// row — so they are available from any tasks list. The returned Actions are
+// fresh each call, carrying their own per-dialog state (see createTaskAction).
+func (r *TasksResource) Actions(id string) []Action {
+	return []Action{
+		createTaskAction(r.tc, r.history, true),
+		createTaskAction(r.tc, r.history, false),
+	}
 }
 
 func (r *TasksResource) Name() string      { return "tasks" }

@@ -14,11 +14,24 @@ import (
 // does (see taskListRows/taskListColumns), with the group's sealed status
 // surfaced via Subtitle rather than a page of its own.
 type TaskGroupResource struct {
-	tc taskcluster.Taskcluster
+	tc      taskcluster.Taskcluster
+	history *taskDefHistory
 }
 
 func NewTaskGroupResource(tc taskcluster.Taskcluster) *TaskGroupResource {
-	return &TaskGroupResource{tc: tc}
+	return &TaskGroupResource{tc: tc, history: &taskDefHistory{}}
+}
+
+// Actions exposes the create-task actions on the task-group list
+// (resource.Actionable), the same pair TasksResource offers — the taskgroup
+// list (`:g <id>`, or a task's 'g' jump) is the natural place to create a
+// task, so it shouldn't require knowing the `:tasks <id>` alias. They ignore
+// id — creating a task doesn't act on the highlighted row. See createTaskAction.
+func (r *TaskGroupResource) Actions(id string) []Action {
+	return []Action{
+		createTaskAction(r.tc, r.history, true),
+		createTaskAction(r.tc, r.history, false),
+	}
 }
 
 func (r *TaskGroupResource) Name() string      { return "taskgroup" }

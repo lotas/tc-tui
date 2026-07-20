@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	"github.com/taskcluster/tc-tui/resource"
 )
@@ -198,6 +199,148 @@ func TestNonDestructiveActionRefreshesCurrentView(t *testing.T) {
 	waitFor(t, func() bool { return readOnUI(s, func() bool { return !s.actionOpen }) })
 }
 
+func TestActionNextNavigatesToCreatedEntityOnSuccess(t *testing.T) {
+	const createdID = "NEW-task-123"
+	action := resource.Action{
+		Key:     'c',
+		Label:   "create widget",
+		Prompt:  "Create a widget?",
+		Perform: func(resource.ActionInput) error { return nil },
+		Next: func() (resource.NavTarget, bool) {
+			return resource.NavTarget{ResourceName: "target", ID: createdID, Kind: resource.NavDetail}, true
+		},
+	}
+	s, _ := actionableShell(t, []resource.Action{action})
+	// showDetail resolves the navigation target through the registry, so the
+	// resource Next points at must be registered.
+	s.registry.Register(fakeResource{name: "target"})
+	startRunning(t, s)
+
+	s.app.QueueUpdateDraw(func() { s.startAction(action) })
+	waitFor(t, func() bool { return readOnUI(s, func() bool { return s.actionOpen }) })
+
+	s.app.QueueUpdateDraw(func() { s.submitAction() })
+
+	// A successful Perform with a Next target navigates to that entity's
+	// detail (pushed on top of the launching view) and closes the dialog.
+	waitFor(t, func() bool {
+		return readOnUI(s, func() bool {
+			top, ok := s.stack.Top()
+			return ok && top.ResourceName == "target" && top.SelectedID == createdID && top.Kind == DetailKind
+		})
+	})
+	if readOnUI(s, func() bool { return s.actionOpen }) {
+		t.Fatalf("dialog should be closed after navigating to the created entity")
+	}
+}
+
+func TestActionInputHistoryCyclesWithCtrlPCtrlN(t *testing.T) {
+	action := resource.Action{
+		Key:          'c',
+		Label:        "create widget",
+		Prompt:       "Paste a definition",
+		Input:        resource.InputYAML,
+		InputLabel:   "definition",
+		InitialText:  "newest",
+		InputHistory: []string{"newest", "middle", "oldest"},
+		Perform:      func(resource.ActionInput) error { return nil },
+	}
+	s, _ := actionableShell(t, []resource.Action{action})
+	s.startAction(action)
+
+	ta, ok := s.actionView.form.GetFormItem(s.actionView.inputIndex).(*tview.TextArea)
+	if !ok {
+		t.Fatalf("expected a multi-line text area for a YAML input")
+	}
+
+	// The dialog installs an input capture on the text area for the history
+	// keys; drive it directly (as tview would on a keystroke). Ctrl-P walks
+	// toward older entries, Ctrl-N back toward newer, clamping at each end.
+	capture := ta.GetInputCapture()
+	if capture == nil {
+		t.Fatalf("expected a history input capture on the text area")
+	}
+	ctrlP := tcell.NewEventKey(tcell.KeyCtrlP, 0, tcell.ModNone)
+	ctrlN := tcell.NewEventKey(tcell.KeyCtrlN, 0, tcell.ModNone)
+
+	if capture(ctrlP) != nil { // history keys are consumed, not forwarded
+		t.Fatalf("Ctrl-P should be consumed by the history capture")
+	}
+	if got := ta.GetText(); got != "middle" {
+		t.Fatalf("after one Ctrl-P: text = %q, want middle", got)
+	}
+	capture(ctrlP)
+	if got := ta.GetText(); got != "oldest" {
+		t.Fatalf("after two Ctrl-P: text = %q, want oldest", got)
+	}
+	capture(ctrlP) // clamps at the oldest
+	if got := ta.GetText(); got != "oldest" {
+		t.Fatalf("Ctrl-P past the end should clamp at oldest, got %q", got)
+	}
+	if capture(ctrlN) != nil {
+		t.Fatalf("Ctrl-N should be consumed by the history capture")
+	}
+	if got := ta.GetText(); got != "middle" {
+		t.Fatalf("after Ctrl-N: text = %q, want middle", got)
+	}
+
+	// A non-history key passes through untouched.
+	other := tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModNone)
+	if capture(other) != other {
+		t.Fatalf("a normal key should pass through the capture")
+	}
+}
+
+func TestActionInputHistoryPreservesEditedDraft(t *testing.T) {
+	// Editing the opening buffer (index 0) and then cycling into history must
+	// not discard the edit: cycling back restores the edited draft, not the
+	// pristine newest history entry. Likewise an edit made while browsing an
+	// older entry survives a round trip.
+	action := resource.Action{
+		Key:          'c',
+		Label:        "create widget",
+		Prompt:       "Paste a definition",
+		Input:        resource.InputYAML,
+		InputLabel:   "definition",
+		InitialText:  "newest",
+		InputHistory: []string{"newest", "middle", "oldest"},
+		Perform:      func(resource.ActionInput) error { return nil },
+	}
+	s, _ := actionableShell(t, []resource.Action{action})
+	s.startAction(action)
+
+	ta, ok := s.actionView.form.GetFormItem(s.actionView.inputIndex).(*tview.TextArea)
+	if !ok {
+		t.Fatalf("expected a multi-line text area for a YAML input")
+	}
+	capture := ta.GetInputCapture()
+	ctrlP := tcell.NewEventKey(tcell.KeyCtrlP, 0, tcell.ModNone)
+	ctrlN := tcell.NewEventKey(tcell.KeyCtrlN, 0, tcell.ModNone)
+
+	// Edit the opening draft, then walk to an older entry and back.
+	ta.SetText("my edited draft", true)
+	capture(ctrlP)
+	if got := ta.GetText(); got != "middle" {
+		t.Fatalf("after Ctrl-P: text = %q, want middle", got)
+	}
+	capture(ctrlN)
+	if got := ta.GetText(); got != "my edited draft" {
+		t.Fatalf("Ctrl-N should restore the edited draft, got %q", got)
+	}
+
+	// An edit made on a history entry is likewise preserved across a round trip.
+	capture(ctrlP) // -> middle
+	ta.SetText("edited middle", true)
+	capture(ctrlP) // -> oldest
+	if got := ta.GetText(); got != "oldest" {
+		t.Fatalf("after Ctrl-P to oldest: text = %q, want oldest", got)
+	}
+	capture(ctrlN) // -> back to (edited) middle
+	if got := ta.GetText(); got != "edited middle" {
+		t.Fatalf("Ctrl-N should restore the edited middle entry, got %q", got)
+	}
+}
+
 func TestActionPerformErrorKeepsDialogOpen(t *testing.T) {
 	action := resource.Action{
 		Key:     'g',
@@ -241,6 +384,30 @@ func TestActionKeyDispatchOpensDialog(t *testing.T) {
 	}
 	if s.currentAction.Label != "cancel widget" {
 		t.Fatalf("expected the dispatched action to be current, got %q", s.currentAction.Label)
+	}
+}
+
+func TestActionResolvesOnListWithoutSelectedRow(t *testing.T) {
+	// A resource-level action (e.g. create task) must be reachable from a list
+	// that has no highlighted row yet — empty or still loading — since it
+	// ignores the row id.
+	action := resource.Action{
+		Key:     'c',
+		Label:   "create widget",
+		Prompt:  "Create a widget?",
+		Perform: func(resource.ActionInput) error { return nil },
+	}
+	s, _ := actionableShell(t, []resource.Action{action})
+	// Put a list view of the actionable resource on top; s.table has no rows,
+	// so SelectedRow() reports no selection.
+	s.stack.Push(View{ResourceName: "widgets", Kind: ListKind})
+
+	resolved, ok := s.resolveActionByKey('c')
+	if !ok {
+		t.Fatalf("expected the action to resolve on a list with no selected row")
+	}
+	if resolved.Label != "create widget" {
+		t.Fatalf("resolved wrong action: %q", resolved.Label)
 	}
 }
 

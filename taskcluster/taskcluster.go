@@ -87,6 +87,7 @@ type Taskcluster interface {
 	GetWorkerPoolErrorCount(workerPoolID string) (int, error)
 
 	GetTask(taskID string) (*tcqueue.TaskDefinitionResponse, error)
+	CreateTask(taskID string, body json.RawMessage) (*tcqueue.TaskStatusResponse, error)
 	GetTaskStatus(taskID string) (*tcqueue.TaskStatusStructure, error)
 	GetTaskGroup(taskGroupID string) (*tcqueue.TaskGroupDefinitionResponse, error)
 	GetTaskGroupTasks(taskGroupID string, limit int) (TaskGroupTaskList, bool, error)
@@ -499,6 +500,24 @@ func (tc *TC) GetWorkerPoolErrorCount(workerPoolID string) (int, error) {
 
 func (tc *TC) GetTask(taskID string) (*tcqueue.TaskDefinitionResponse, error) {
 	return tc.queue.Task(taskID)
+}
+
+// CreateTask submits a new task definition under taskID (a slugid the caller
+// generates). Queue.createTask is idempotent, so a retry with the same taskID
+// and payload is safe.
+//
+// The body is sent verbatim rather than round-tripped through
+// tcqueue.TaskDefinitionRequest: that struct marks fields like retries
+// `omitempty`, which would silently drop an explicit `retries: 0` and let the
+// queue apply its default of 5. A json.RawMessage marshals to itself, so
+// APICall forwards exactly the JSON the user submitted.
+func (tc *TC) CreateTask(taskID string, body json.RawMessage) (*tcqueue.TaskStatusResponse, error) {
+	cd := tcclient.Client(*tc.queue)
+	resp, _, err := (&cd).APICall(body, "PUT", "/task/"+url.PathEscape(taskID), new(tcqueue.TaskStatusResponse), nil)
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*tcqueue.TaskStatusResponse), nil
 }
 
 func (tc *TC) GetTaskStatus(taskID string) (*tcqueue.TaskStatusStructure, error) {
